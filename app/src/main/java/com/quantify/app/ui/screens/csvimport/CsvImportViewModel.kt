@@ -2,6 +2,11 @@ package com.quantify.app.ui.screens.csvimport
 
 import android.content.Context
 import android.net.Uri
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.quantify.app.data.local.entity.CategoryEntity
@@ -16,11 +21,15 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import javax.inject.Inject
 
 /** User's classification choice for one CSV row */
@@ -36,11 +45,85 @@ class CsvImportViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val transactionRepository: TransactionRepository,
     private val categoryRepository: CategoryRepository,
-    private val paymentMethodRepository: PaymentMethodRepository
+    private val paymentMethodRepository: PaymentMethodRepository,
+    private val dataStore: DataStore<Preferences>
 ) : ViewModel() {
+
+    companion object {
+        private val KEY_SESSION = stringPreferencesKey("csvimport_session_json")
+        private val KEY_HAS_PENDING = booleanPreferencesKey("csvimport_has_pending")
+    }
+
+    private val json = Json { encodeDefaults = true; ignoreUnknownKeys = true }
 
     private val _state = MutableStateFlow(CsvImportState())
     val state: StateFlow<CsvImportState> = _state.asStateFlow()
+
+    private val _hasPendingSession = MutableStateFlow(false)
+    val hasPendingSession: StateFlow<Boolean> = _hasPendingSession.asStateFlow()
+
+    private fun isClassifying(): Boolean = _state.value.status == CsvImportStatus.CLASSIFYING
+
+    private fun saveSession() {
+        if (!isClassifying()) return
+        val s = _state.value
+        if (s.parsedRows.isEmpty()) return
+        viewModelScope.launch {
+            val session = CsvImportSession(
+                rows = s.parsedRows.map { it.toSnapshot() },
+                classifications = s.classifications.map { it.toSnapshot() },
+                currentRow = s.currentRow
+            )
+            dataStore.edit { prefs ->
+                prefs[KEY_SESSION] = json.encodeToString(session)
+                prefs[KEY_HAS_PENDING] = true
+            }
+        }
+    }
+
+    fun restoreSession() {
+        val s = _state.value
+        if (s.parsedRows.isNotEmpty()) return // already have data
+        viewModelScope.launch {
+            try {
+                val prefs = dataStore.data.first()
+                val jsonStr = prefs[KEY_SESSION] ?: return@launch
+                val session = json.decodeFromString<CsvImportSession>(jsonStr)
+                val rows = session.rows.mapIndexed { i, snap -> snap.fromSnapshot(i) }
+                val classifications = session.classifications.map { it.toClassification() }.toMutableList()
+                _state.update {
+                    it.copy(
+                        parsedRows = rows,
+                        classifications = classifications,
+                        currentRow = session.currentRow.coerceIn(0, rows.size.coerceAtLeast(1) - 1),
+                        status = CsvImportStatus.CLASSIFYING
+                    )
+                }
+                clearSession()
+            } catch (e: Exception) {
+                Log.e("CsvImport", "Failed to restore session", e)
+                clearSession()
+            }
+        }
+    }
+
+    private fun clearSession() {
+        viewModelScope.launch {
+            dataStore.edit { prefs ->
+                prefs.remove(KEY_SESSION)
+                prefs[KEY_HAS_PENDING] = false
+            }
+            _hasPendingSession.value = false
+        }
+    }
+
+    fun checkPendingSession() {
+        viewModelScope.launch {
+            dataStore.data.collect { prefs ->
+                _hasPendingSession.value = prefs[KEY_HAS_PENDING] ?: false
+            }
+        }
+    }
 
     init {
         viewModelScope.launch {
@@ -91,6 +174,8 @@ class CsvImportViewModel @Inject constructor(
                     status = CsvImportStatus.CLASSIFYING
                 )
             }
+            // Overwrite any pending session with the newly loaded CSV
+            saveSession()
         }
     }
 
@@ -99,6 +184,7 @@ class CsvImportViewModel @Inject constructor(
             val cl = it.classifications[index]
             it.copy(classifications = it.classifications.toMutableList().apply { this[index] = cl.copy(categoryId = categoryId) })
         }
+        saveSession()
     }
 
     fun setPaymentMethod(index: Int, paymentMethodId: String?) {
@@ -106,6 +192,7 @@ class CsvImportViewModel @Inject constructor(
             val cl = it.classifications[index]
             it.copy(classifications = it.classifications.toMutableList().apply { this[index] = cl.copy(paymentMethodId = paymentMethodId) })
         }
+        saveSession()
     }
 
     fun setLabel(index: Int, label: String) {
@@ -113,6 +200,7 @@ class CsvImportViewModel @Inject constructor(
             val cl = it.classifications[index]
             it.copy(classifications = it.classifications.toMutableList().apply { this[index] = cl.copy(label = label) })
         }
+        saveSession()
     }
 
     fun setIgnored(index: Int, ignored: Boolean) {
@@ -120,6 +208,7 @@ class CsvImportViewModel @Inject constructor(
             val cl = it.classifications[index]
             it.copy(classifications = it.classifications.toMutableList().apply { this[index] = cl.copy(ignored = ignored) })
         }
+        saveSession()
     }
 
     /** Remove the row entirely and stay on the same index (which is now the next row) */
@@ -132,6 +221,7 @@ class CsvImportViewModel @Inject constructor(
             val newRow = if (index < newRows.size) index else maxOf(0, index - 1)
             it.copy(parsedRows = newRows, classifications = newClassifications, currentRow = newRow)
         }
+        saveSession()
     }
 
     /**
@@ -154,6 +244,7 @@ class CsvImportViewModel @Inject constructor(
             }
             it.copy(parsedRows = newRows, classifications = newClassifications)
         }
+        saveSession()
     }
 
     fun nextRow() {
@@ -161,6 +252,7 @@ class CsvImportViewModel @Inject constructor(
             if (it.currentRow < it.parsedRows.size - 1) it.copy(currentRow = it.currentRow + 1)
             else it
         }
+        saveSession()
     }
 
     fun prevRow() {
@@ -168,6 +260,7 @@ class CsvImportViewModel @Inject constructor(
             if (it.currentRow > 0) it.copy(currentRow = it.currentRow - 1)
             else it
         }
+        saveSession()
     }
 
     fun saveAllTransactions(onComplete: () -> Unit) {
@@ -213,6 +306,7 @@ class CsvImportViewModel @Inject constructor(
 
                 Log.d("CsvImport", "All inserted, saved=$saved")
                 _state.update { it.copy(status = CsvImportStatus.DONE, savedCount = saved) }
+                clearSession()
                 onComplete()
             } catch (e: Exception) {
                 Log.e("CsvImport", "Failed to save transactions", e)
@@ -228,6 +322,7 @@ class CsvImportViewModel @Inject constructor(
 
     fun reset() {
         viewModelScope.launch {
+            clearSession()
             val (cats, paymentMethods, defaultPmId) = withContext(Dispatchers.IO) {
                 val cats = categoryRepository.getAll().first()
                 val paymentMethods = paymentMethodRepository.getAll().first()

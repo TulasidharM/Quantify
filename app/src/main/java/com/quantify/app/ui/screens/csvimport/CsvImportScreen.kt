@@ -34,10 +34,21 @@ fun CsvImportScreen(
     onClose: () -> Unit,
     viewModel: CsvImportViewModel = hiltViewModel()
 ) {
-    LaunchedEffect(Unit) {
-        viewModel.reset()
-    }
     val state by viewModel.state.collectAsState()
+    val hasPending by viewModel.hasPendingSession.collectAsState()
+
+    // Check for pending session on first compose
+    LaunchedEffect(Unit) {
+        viewModel.checkPendingSession()
+    }
+
+    // Show restore dialog when there's a pending session and we're idle
+    var showRestoreDialog by remember { mutableStateOf(false) }
+    LaunchedEffect(hasPending, state.status) {
+        if (hasPending && state.status == CsvImportStatus.IDLE) {
+            showRestoreDialog = true
+        }
+    }
 
     val csvLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let { viewModel.loadCsv(it) }
@@ -60,6 +71,9 @@ fun CsvImportScreen(
                 onSplitRow = { amount -> viewModel.splitRow(state.currentRow, amount) },
                 onSaveAll = {
                     viewModel.saveAllTransactions { }
+                },
+                onStartOver = {
+                    viewModel.reset()
                 }
             )
         }
@@ -73,6 +87,34 @@ fun CsvImportScreen(
                 onClose = onClose
             )
         }
+    }
+
+    // Restore previous session dialog
+    if (showRestoreDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                viewModel.reset()
+                showRestoreDialog = false
+            },
+            title = { Text("Restore Previous Import?") },
+            text = { Text("You have an unfinished CSV import. Would you like to continue where you left off?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showRestoreDialog = false
+                    viewModel.restoreSession()
+                }) {
+                    Text("Restore")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showRestoreDialog = false
+                    viewModel.reset()
+                }) {
+                    Text("Discard")
+                }
+            }
+        )
     }
 }
 
@@ -119,13 +161,15 @@ fun CsvClassifyScreen(
     onSetPaymentMethod: (String?) -> Unit,
     onIgnoreAndNext: () -> Unit,
     onSplitRow: (Double) -> Unit,
-    onSaveAll: () -> Unit
+    onSaveAll: () -> Unit,
+    onStartOver: () -> Unit
 ) {
     val row = state.parsedRows.getOrNull(state.currentRow) ?: return
     val classification = state.classifications.getOrNull(state.currentRow) ?: RowClassification()
 
     var showConfirm by remember { mutableStateOf(false) }
     var showSplit by remember { mutableStateOf(false) }
+    var showStartOver by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
 
     val direction = row.direction
@@ -143,6 +187,11 @@ fun CsvClassifyScreen(
                     }
                 },
                 actions = {
+                    IconButton(
+                        onClick = { showStartOver = true },
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Start over")
+                    }
                     IconButton(
                         onClick = { showConfirm = true },
                         enabled = state.parsedRows.isNotEmpty()
@@ -431,6 +480,28 @@ fun CsvClassifyScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showSplit = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    // Start over confirm dialog
+    if (showStartOver) {
+        AlertDialog(
+            onDismissRequest = { showStartOver = false },
+            title = { Text("Start Over?") },
+            text = { Text("This will discard all progress and let you import a new CSV.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showStartOver = false
+                        onStartOver()
+                    }
+                ) {
+                    Text("Start Over", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showStartOver = false }) { Text("Cancel") }
             }
         )
     }

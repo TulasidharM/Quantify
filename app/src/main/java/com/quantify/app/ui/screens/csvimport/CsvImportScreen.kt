@@ -276,28 +276,20 @@ fun CsvClassifyScreen(
                     val typeFilter = if (direction == Direction.PAID) "EXPENSE" else "INCOME"
                     val parentCats = state.categories.filter { it.parentId == null && it.type == typeFilter }.sortedBy { it.name.lowercase() }
 
-                    // Determine which parent to show subcategories for
-                    val selectedParentForSubs = if (classification.categoryId != null) {
-                        val cat = state.categories.find { it.id == classification.categoryId }
-                        cat?.parentId ?: classification.categoryId
-                    } else null
-
-                    var selectedParentById by remember(state.currentRow) {
-                        mutableStateOf(selectedParentForSubs ?: "")
-                    }
+                    // Derive selected parent directly from classification state (reactive, no local mutableStateOf)
+                    val selectedParentById = classification.categoryId?.let { cid ->
+                        state.categories.find { it.id == cid }?.parentId ?: cid
+                    } ?: ""
 
                     val subsForSelectedParent = state.categories.filter {
-                        it.parentId == selectedParentById && it.type == typeFilter && it.parentId != null
+                        it.parentId == selectedParentById && it.type == typeFilter
                     }.sortedBy { it.name.lowercase() }
 
                     LazyRow(modifier = Modifier.padding(start = 0.dp)) {
                         items(parentCats) { parent ->
                             FilterChip(
                                 selected = parent.id == selectedParentById,
-                                onClick = {
-                                    selectedParentById = parent.id
-                                    onSetCategory(parent.id)
-                                },
+                                onClick = { onSetCategory(parent.id) },
                                 label = { Text(parent.name) },
                                 modifier = Modifier.padding(end = 8.dp)
                             )

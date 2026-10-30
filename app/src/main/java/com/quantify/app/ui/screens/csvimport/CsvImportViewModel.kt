@@ -227,15 +227,26 @@ class CsvImportViewModel @Inject constructor(
     }
 
     fun reset() {
-        _state.update {
-            it.copy(
-                parsedRows = emptyList(),
-                classifications = mutableListOf(),
-                currentRow = 0,
-                status = CsvImportStatus.IDLE,
-                savedCount = 0,
-                errorMessage = null
-            )
+        viewModelScope.launch {
+            val (cats, paymentMethods, defaultPmId) = withContext(Dispatchers.IO) {
+                val cats = categoryRepository.getAll().first()
+                val paymentMethods = paymentMethodRepository.getAll().first()
+                val defaultPmId = paymentMethodRepository.getDefault()?.id
+                Triple(cats, paymentMethods, defaultPmId)
+            }
+            _state.update {
+                it.copy(
+                    parsedRows = emptyList(),
+                    classifications = mutableListOf(),
+                    currentRow = 0,
+                    status = CsvImportStatus.IDLE,
+                    savedCount = 0,
+                    errorMessage = null,
+                    categories = cats,
+                    paymentMethods = paymentMethods,
+                    defaultPaymentMethodId = defaultPmId
+                )
+            }
         }
     }
 }

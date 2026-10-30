@@ -9,6 +9,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -35,7 +36,11 @@ fun MonthPicker(
     val tz = TimeZone.currentSystemDefault()
     val now = remember { Clock.System.now().toLocalDateTime(tz) }
     val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val screenWidth = with(density) {
+        LocalConfiguration.current.screenWidthDp.dp
+    }
+    val itemWidth = 96.dp // card width (64dp min + 24dp padding) + 4dp spacing ≈ 96
 
     // Generate months: 12 before current to 12 after current (25 months total)
     val months = remember(now.year, now.monthNumber) {
@@ -52,13 +57,19 @@ fun MonthPicker(
     LaunchedEffect(selectedYear, selectedMonth) {
         val idx = months.indexOfFirst { it.first == selectedYear && it.second == selectedMonth }
         if (idx >= 0) {
-            scope.launch {
-                listState.animateScrollToItem(idx)
-            }
+            val scrollOffsetPx = with(density) { screenWidth.toPx() }
+            val itemWidthPx = with(density) { itemWidth.toPx() }
+            // Center the item: scroll so the item starts at (screenCenter - itemWidth/2)
+            val targetOffset = (idx * itemWidthPx) - (scrollOffsetPx / 2f) + (itemWidthPx / 2f)
+            // Clamp to valid range
+            val maxOffset = maxOf(0f, (months.size - 1) * itemWidthPx - scrollOffsetPx + itemWidthPx)
+            val clampedOffset = targetOffset.coerceIn(0f, maxOffset)
+            val targetIndex = (clampedOffset / itemWidthPx).toInt()
+            val targetScrollOffset = clampedOffset - (targetIndex * itemWidthPx)
+            listState.scrollToItem(index = maxOf(0, targetIndex), scrollOffset = targetScrollOffset.toInt())
         }
     }
 
-    val density = LocalDensity.current
     LazyRow(
         state = listState,
         horizontalArrangement = Arrangement.spacedBy(4.dp),

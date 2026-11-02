@@ -247,6 +247,14 @@ class CsvImportViewModel @Inject constructor(
         saveSession()
     }
 
+    fun addCategory(category: CategoryEntity) {
+        viewModelScope.launch {
+            categoryRepository.insert(category)
+            val cats = categoryRepository.getAll().first()
+            _state.update { it.copy(categories = cats) }
+        }
+    }
+
     fun nextRow() {
         _state.update {
             if (it.currentRow < it.parsedRows.size - 1) it.copy(currentRow = it.currentRow + 1)

@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -33,6 +34,7 @@ fun TransactionsScreen(
     onAddTransaction: () -> Unit,
     onEditTransaction: (String) -> Unit,
     onBack: (() -> Unit)? = null,
+    onSharePdf: () -> Unit = {},
     viewModel: TransactionViewModel = hiltViewModel()
 ) {
     val transactions by viewModel.transactionsByMonth.collectAsState()
@@ -65,7 +67,7 @@ fun TransactionsScreen(
             val matchesType = filterType == null || it.type == filterType
             val matchesCategory = filteredCategoryIds == null || it.categoryId in filteredCategoryIds
             matchesSearch && matchesType && matchesCategory
-        }
+        }.sortedByDescending { it.amount }
     }
 
     Scaffold(
@@ -82,6 +84,9 @@ fun TransactionsScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = onSharePdf) {
+                        Icon(Icons.Default.Share, contentDescription = "Share PDF")
+                    }
                     IconButton(onClick = onAddTransaction) {
                         Icon(Icons.Default.Add, contentDescription = "Add")
                     }
@@ -97,6 +102,13 @@ fun TransactionsScreen(
                 }
                 income to expense
             }
+
+            // When a category filter is active, determine which total to show based on category type
+            val filteredCategoryType = remember(categories, filterCategoryId) {
+                if (filterCategoryId == null) null
+                else categories.find { it.id == filterCategoryId }?.type
+            }
+
             if (filtered.isNotEmpty()) {
                 Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
                     Row(
@@ -105,22 +117,56 @@ fun TransactionsScreen(
                             .padding(horizontal = 16.dp, vertical = 12.dp),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Column {
-                            Text("Income", style = MaterialTheme.typography.labelSmall)
-                            Text(formatCurrency(totalIncome), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
-                        }
-                        Column {
-                            Text("Expense", style = MaterialTheme.typography.labelSmall)
-                            Text(formatCurrency(totalExpense), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Medium)
-                        }
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text("Net", style = MaterialTheme.typography.labelSmall)
-                            Text(
-                                if (totalIncome - totalExpense >= 0) "+${formatCurrency(totalIncome - totalExpense)}" else "-${formatCurrency(Math.abs(totalIncome - totalExpense))}",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = if (totalIncome - totalExpense >= 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error,
-                                fontWeight = FontWeight.Medium
-                            )
+                        when (filteredCategoryType) {
+                            "EXPENSE" -> {
+                                Column {
+                                    Text("Expense", style = MaterialTheme.typography.labelSmall)
+                                    Text(formatCurrency(totalExpense), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Medium)
+                                }
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text("Net", style = MaterialTheme.typography.labelSmall)
+                                    Text(
+                                        "-${formatCurrency(totalExpense)}",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.error,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+                            "INCOME" -> {
+                                Column {
+                                    Text("Income", style = MaterialTheme.typography.labelSmall)
+                                    Text(formatCurrency(totalIncome), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
+                                }
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text("Net", style = MaterialTheme.typography.labelSmall)
+                                    Text(
+                                        "+${formatCurrency(totalIncome)}",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+                            else -> {
+                                Column {
+                                    Text("Income", style = MaterialTheme.typography.labelSmall)
+                                    Text(formatCurrency(totalIncome), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
+                                }
+                                Column {
+                                    Text("Expense", style = MaterialTheme.typography.labelSmall)
+                                    Text(formatCurrency(totalExpense), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Medium)
+                                }
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text("Net", style = MaterialTheme.typography.labelSmall)
+                                    Text(
+                                        if (totalIncome - totalExpense >= 0) "+${formatCurrency(totalIncome - totalExpense)}" else "-${formatCurrency(Math.abs(totalIncome - totalExpense))}",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = if (totalIncome - totalExpense >= 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
                         }
                     }
                 }

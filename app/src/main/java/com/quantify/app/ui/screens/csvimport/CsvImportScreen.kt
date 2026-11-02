@@ -74,6 +74,17 @@ fun CsvImportScreen(
                 },
                 onStartOver = {
                     viewModel.reset()
+                },
+                onAddCategory = { newId, name, type ->
+                    viewModel.addCategory(CategoryEntity(
+                        id = newId,
+                        name = name,
+                        type = type,
+                        color = 0xFF4C662BL,
+                        icon = "",
+                        isDefault = false,
+                        parentId = null
+                    ))
                 }
             )
         }
@@ -162,7 +173,8 @@ fun CsvClassifyScreen(
     onIgnoreAndNext: () -> Unit,
     onSplitRow: (Double) -> Unit,
     onSaveAll: () -> Unit,
-    onStartOver: () -> Unit
+    onStartOver: () -> Unit,
+    onAddCategory: (String, String, String) -> Unit = { _, _, _ -> }
 ) {
     val row = state.parsedRows.getOrNull(state.currentRow) ?: return
     val classification = state.classifications.getOrNull(state.currentRow) ?: RowClassification()
@@ -170,6 +182,7 @@ fun CsvClassifyScreen(
     var showConfirm by remember { mutableStateOf(false) }
     var showSplit by remember { mutableStateOf(false) }
     var showStartOver by remember { mutableStateOf(false) }
+    var showAddCategoryDialog by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
 
     val direction = row.direction
@@ -282,30 +295,32 @@ fun CsvClassifyScreen(
                         fontWeight = FontWeight.Medium
                     )
 
-                    // Label field with clear button
+                    // Label field with clear button — keyed by row index so state resets when navigating
                     Spacer(modifier = Modifier.height(16.dp))
-                    var labelText by remember(state.currentRow) { mutableStateOf(classification.label.ifBlank { row.vendor }) }
-                    OutlinedTextField(
-                        value = labelText,
-                        onValueChange = {
-                            labelText = it
-                            onSetLabel(it)
-                        },
-                        label = { Text("Label (optional)") },
-                        placeholder = { Text(row.vendor) },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        trailingIcon = {
-                            if (labelText.isNotEmpty()) {
-                                IconButton(onClick = {
-                                    labelText = ""
-                                    onSetLabel("")
-                                }) {
-                                    Icon(Icons.Default.Close, contentDescription = "Clear label")
+                    key(state.currentRow) {
+                        var labelText by remember { mutableStateOf(classification.label.ifBlank { row.vendor }) }
+                        OutlinedTextField(
+                            value = labelText,
+                            onValueChange = {
+                                labelText = it
+                                onSetLabel(it)
+                            },
+                            label = { Text("Label (optional)") },
+                            placeholder = { Text(row.vendor) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            trailingIcon = {
+                                if (labelText.isNotEmpty()) {
+                                    IconButton(onClick = {
+                                        labelText = ""
+                                        onSetLabel("")
+                                    }) {
+                                        Icon(Icons.Default.Close, contentDescription = "Clear label")
+                                    }
                                 }
                             }
-                        }
-                    )
+                        )
+                    }
 
                     // Ignore button — marks as ignored and moves to next
                     Spacer(modifier = Modifier.height(12.dp))
@@ -335,6 +350,19 @@ fun CsvClassifyScreen(
                     }.sortedBy { it.name.lowercase() }
 
                     LazyRow(modifier = Modifier.padding(start = 0.dp)) {
+                        item {
+                            FilterChip(
+                                selected = false,
+                                onClick = { showAddCategoryDialog = true },
+                                label = {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Icon(Icons.Default.AddCircleOutline, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Text("Add New")
+                                    }
+                                },
+                                modifier = Modifier.padding(end = 8.dp)
+                            )
+                        }
                         items(parentCats) { parent ->
                             FilterChip(
                                 selected = parent.id == selectedParentById,
@@ -520,6 +548,41 @@ fun CsvClassifyScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showConfirm = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    // Add new category dialog
+    if (showAddCategoryDialog) {
+        var newCatName by remember { mutableStateOf("") }
+        val typeFilter = if (row.direction == Direction.PAID) "EXPENSE" else "INCOME"
+        AlertDialog(
+            onDismissRequest = { showAddCategoryDialog = false },
+            title = { Text("New Category") },
+            text = {
+                OutlinedTextField(
+                    value = newCatName,
+                    onValueChange = { newCatName = it },
+                    label = { Text("Name") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (newCatName.isNotBlank()) {
+                            val newId = java.util.UUID.randomUUID().toString()
+                            onAddCategory(newId, newCatName, typeFilter)
+                            onSetCategory(newId)
+                            showAddCategoryDialog = false
+                        }
+                    },
+                    enabled = newCatName.isNotBlank()
+                ) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddCategoryDialog = false }) { Text("Cancel") }
             }
         )
     }

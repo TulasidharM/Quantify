@@ -15,6 +15,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.Icons
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.quantify.app.R
 import com.quantify.app.data.local.entity.CategoryEntity
@@ -30,6 +34,8 @@ import kotlinx.datetime.toLocalDateTime
 fun DashboardScreen(
     onNavigateToTransactions: () -> Unit,
     onNavigateToCategory: (String) -> Unit,
+    onSharePdf: () -> Unit = {},
+    onAddTransaction: () -> Unit = {},
     viewModel: DashboardViewModel = hiltViewModel()
 ) {
     val recent by viewModel.recentTransactions.collectAsState()
@@ -49,9 +55,17 @@ fun DashboardScreen(
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.app_name)) },
+                actions = {
+                    IconButton(onClick = onAddTransaction) {
+                        Icon(Icons.Default.Add, contentDescription = "Add Transaction")
+                    }
+                    IconButton(onClick = onSharePdf) {
+                        Icon(Icons.Default.Share, contentDescription = "Share PDF")
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
             )
-        }
+        },
     ) { padding ->
         Column(modifier = Modifier.padding(padding)) {
             com.quantify.app.ui.components.MonthPicker(

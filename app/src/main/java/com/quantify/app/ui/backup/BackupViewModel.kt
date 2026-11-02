@@ -1,6 +1,10 @@
 package com.quantify.app.ui.backup
 
 import android.content.Context
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.RectF
+import android.graphics.pdf.PdfDocument
 import android.net.Uri
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.datastore.core.DataStore
@@ -308,5 +312,375 @@ class BackupViewModel @Inject constructor(
         // Recurring rules
         recurringRuleRepository.deleteAll()
         backup.recurringRules.forEach { recurringRuleRepository.insert(it) }
+    }
+
+    fun generatePdf(
+        transactions: List<TransactionEntity>,
+        categories: List<CategoryEntity>,
+        year: Int,
+        month: Int,
+        currency: String,
+        file: java.io.File
+    ) {
+        viewModelScope.launch {
+            val document = PdfDocument()
+
+            // A4 dimensions in points
+            val PAGE_WIDTH = 595
+            val PAGE_HEIGHT = 842
+
+            // Page layout
+            val MARGIN = 72f
+            val CONTENT_WIDTH = PAGE_WIDTH - (MARGIN * 2)
+
+            // Palette
+            val NAVY = android.graphics.Color.rgb(20, 31, 52)
+            val NAVY_LIGHT = android.graphics.Color.rgb(35, 49, 73)
+            val BACKGROUND = android.graphics.Color.rgb(247, 249, 252)
+            val WHITE = android.graphics.Color.WHITE
+            val TEXT_PRIMARY = android.graphics.Color.rgb(35, 45, 62)
+            val TEXT_SECONDARY = android.graphics.Color.rgb(115, 125, 140)
+            val BORDER = android.graphics.Color.rgb(225, 230, 237)
+            val GREEN = android.graphics.Color.rgb(25, 155, 105)
+            val RED = android.graphics.Color.rgb(220, 75, 85)
+            val LIGHT_GREEN = android.graphics.Color.rgb(232, 247, 240)
+            val LIGHT_RED = android.graphics.Color.rgb(253, 237, 238)
+            val ROW_ALT = android.graphics.Color.rgb(246, 248, 251)
+
+            val locale = java.util.Locale("en", "IN")
+            val currencyFormat = java.text.NumberFormat.getCurrencyInstance(locale).apply {
+                maximumFractionDigits = 0
+                minimumFractionDigits = 0
+            }
+
+            val monthName = java.time.Month.of(month)
+                .getDisplayName(java.time.format.TextStyle.FULL, locale)
+            val reportPeriod = "$monthName $year"
+
+            val categoryMap = categories.associateBy({ it.id }, { it })
+
+            val totalIncome = transactions.filter { it.type == "INCOME" }.sumOf { it.amount }
+            val totalExpenses = transactions.filter { it.type == "EXPENSE" }.sumOf { it.amount }
+            val netBalance = totalIncome - totalExpenses
+
+            val expenseTransactions = transactions.filter { it.type == "EXPENSE" }
+            val categoryTotals = expenseTransactions
+                .groupBy { it.categoryId }
+                .mapValues { (_, items) -> items.sumOf { it.amount } }
+                .entries.sortedByDescending { it.value }
+
+            val transactionCount = transactions.size
+
+            // ---------------------------------------------------------
+            // PAINT HELPERS
+            // ---------------------------------------------------------
+            fun paint(
+                color: Int,
+                textSize: Float = 12f,
+                bold: Boolean = false
+            ): Paint {
+                return Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    this.color = color
+                    this.textSize = textSize
+                    typeface = if (bold) {
+                        android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+                    } else {
+                        android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.NORMAL)
+                    }
+                    style = Paint.Style.FILL
+                }
+            }
+
+            fun drawTextOnCanvas(
+                canvas: Canvas,
+                text: String,
+                x: Float,
+                top: Float,
+                p: Paint
+            ) {
+                val fm = p.fontMetrics
+                val baseline = top - fm.ascent
+                canvas.drawText(text, x, baseline, p)
+            }
+
+            fun drawRightText(
+                canvas: Canvas,
+                text: String,
+                right: Float,
+                top: Float,
+                p: Paint
+            ) {
+                val fm = p.fontMetrics
+                val baseline = top - fm.ascent
+                canvas.drawText(text, right - p.measureText(text), baseline, p)
+            }
+
+            fun drawRoundedRect(
+                canvas: Canvas,
+                left: Float,
+                top: Float,
+                right: Float,
+                bottom: Float,
+                radius: Float,
+                color: Int
+            ) {
+                val p = paint(color)
+                canvas.drawRoundRect(RectF(left, top, right, bottom), radius, radius, p)
+            }
+
+            fun formatAmount(amount: Double): String {
+                return currencyFormat.format(kotlin.math.abs(amount))
+            }
+
+            fun formatDate(epochSeconds: Long): String {
+                return try {
+                    val instant = java.time.Instant.ofEpochSecond(epochSeconds)
+                    val date = java.time.LocalDateTime.ofInstant(instant, java.time.ZoneId.systemDefault())
+                    date.format(java.time.format.DateTimeFormatter.ofPattern("dd MMM yyyy", locale))
+                } catch (e: Exception) {
+                    "-"
+                }
+            }
+
+            fun categoryColor(categoryId: String): Int {
+                val storedColor = categoryMap[categoryId]?.color ?: 0xFF94A3B8L
+                return storedColor.toInt()
+            }
+
+            fun categoryName(categoryId: String): String {
+                return categoryMap[categoryId]?.name ?: "Uncategorized"
+            }
+
+            // ---------------------------------------------------------
+            // PAGE FOOTER
+            // ---------------------------------------------------------
+            fun drawFooter(canvas: Canvas, pageNumber: Int, totalPages: Int) {
+                val y = 785f
+                canvas.drawLine(MARGIN, y, PAGE_WIDTH.toFloat() - MARGIN, y, paint(BORDER, 1f))
+                drawTextOnCanvas(canvas, "QUANTIFY  •  FINANCIAL REPORT", MARGIN, 800f, paint(TEXT_SECONDARY, 8f, true))
+                drawRightText(canvas, "$pageNumber / $totalPages", PAGE_WIDTH.toFloat() - MARGIN, 800f, paint(TEXT_SECONDARY, 9f, true))
+            }
+
+            // ---------------------------------------------------------
+            // COVER PAGE
+            // ---------------------------------------------------------
+            val sortedTransactions = transactions.sortedByDescending { it.amount }
+            val rowsPerPage = 18 // estimated, calculated below
+            val tableHeaderHeight = 32f
+            val rowHeight = 34f
+            val tableTop = 145f
+            val footerLimit = 765f
+            val availableTableHeight = footerLimit - tableTop - tableHeaderHeight
+            val actualRowsPerPage = (availableTableHeight / rowHeight).toInt().coerceAtLeast(1)
+            val transactionsPerPage = sortedTransactions.chunked(actualRowsPerPage)
+            val totalPages = 1 + transactionsPerPage.size
+
+            fun drawCoverPage(canvas: Canvas) {
+                canvas.drawColor(BACKGROUND)
+
+                // Header background
+                canvas.drawRect(0f, 0f, PAGE_WIDTH.toFloat(), 285f, paint(NAVY))
+
+                // Brand
+                drawTextOnCanvas(canvas, "QUANTIFY", MARGIN, 48f, paint(WHITE, 12f, true))
+                drawRightText(canvas, "PERSONAL FINANCE", PAGE_WIDTH.toFloat() - MARGIN, 50f, paint(android.graphics.Color.rgb(165, 180, 205), 8f, true))
+
+                // Title
+                drawTextOnCanvas(canvas, "Monthly Financial", MARGIN, 105f, paint(WHITE, 29f, true))
+                drawTextOnCanvas(canvas, "Report", MARGIN, 143f, paint(WHITE, 29f, true))
+                drawTextOnCanvas(canvas, reportPeriod, MARGIN, 194f, paint(android.graphics.Color.rgb(190, 202, 222), 15f))
+                drawTextOnCanvas(canvas, "$transactionCount transactions recorded", MARGIN, 225f, paint(android.graphics.Color.rgb(165, 180, 205), 10f))
+
+                // Net balance card
+                val cardTop = 255f
+                val cardBottom = 370f
+                drawRoundedRect(canvas, MARGIN, cardTop, PAGE_WIDTH.toFloat() - MARGIN, cardBottom, 14f, WHITE)
+                drawTextOnCanvas(canvas, "NET BALANCE", MARGIN + 22f, cardTop + 20f, paint(TEXT_SECONDARY, 9f, true))
+                val netColor = if (netBalance >= 0) GREEN else RED
+                drawTextOnCanvas(
+                    canvas,
+                    (if (netBalance < 0) "- " else "") + formatAmount(netBalance),
+                    MARGIN + 22f, cardTop + 46f, paint(netColor, 27f, true)
+                )
+                drawTextOnCanvas(canvas, "Income minus expenses", MARGIN + 22f, cardTop + 84f, paint(TEXT_SECONDARY, 9f))
+
+                // Income / Expense cards
+                val summaryTop = 390f
+                val summaryBottom = 485f
+                val gap = 14f
+                val cardWidth = (CONTENT_WIDTH - gap) / 2f
+
+                // Income
+                drawRoundedRect(canvas, MARGIN, summaryTop, MARGIN + cardWidth, summaryBottom, 12f, LIGHT_GREEN)
+                drawTextOnCanvas(canvas, "TOTAL INCOME", MARGIN + 15f, summaryTop + 17f, paint(GREEN, 9f, true))
+                drawTextOnCanvas(canvas, formatAmount(totalIncome), MARGIN + 15f, summaryTop + 44f, paint(TEXT_PRIMARY, 16f, true))
+
+                // Expenses
+                val expenseLeft = MARGIN + cardWidth + gap
+                drawRoundedRect(canvas, expenseLeft, summaryTop, expenseLeft + cardWidth, summaryBottom, 12f, LIGHT_RED)
+                drawTextOnCanvas(canvas, "TOTAL EXPENSES", expenseLeft + 15f, summaryTop + 17f, paint(RED, 9f, true))
+                drawTextOnCanvas(canvas, formatAmount(totalExpenses), expenseLeft + 15f, summaryTop + 44f, paint(TEXT_PRIMARY, 16f, true))
+
+                // Category Breakdown
+                val sectionTop = 515f
+                drawTextOnCanvas(canvas, "Expense Breakdown", MARGIN, sectionTop, paint(TEXT_PRIMARY, 17f, true))
+                drawTextOnCanvas(canvas, "Spending by category", MARGIN, sectionTop + 26f, paint(TEXT_SECONDARY, 9f))
+
+                if (categoryTotals.isEmpty()) {
+                    drawTextOnCanvas(canvas, "No expense data available for this period.", MARGIN, sectionTop + 65f, paint(TEXT_SECONDARY, 10f))
+                } else {
+                    val maxCategories = 5
+                    val displayedCategories = categoryTotals.take(maxCategories)
+                    val barStartX = MARGIN
+                    val barWidth = CONTENT_WIDTH
+                    val barHeight = 7f
+                    var currentY = sectionTop + 65f
+
+                    for (entry in displayedCategories) {
+                        val name = categoryName(entry.key)
+                        val amount = entry.value
+                        val percentage = if (totalExpenses > 0) (amount / totalExpenses) * 100.0 else 0.0
+
+                        drawTextOnCanvas(canvas, name, barStartX, currentY, paint(TEXT_PRIMARY, 10f, true))
+                        drawRightText(canvas, String.format(locale, "%.1f", percentage) + "%", barStartX + barWidth, currentY, paint(TEXT_SECONDARY, 9f, true))
+                        currentY += 19f
+
+                        // Bar background
+                        drawRoundedRect(canvas, barStartX, currentY, barStartX + barWidth, currentY + barHeight, 4f, BORDER)
+
+                        // Bar fill
+                        val filledWidth = (barWidth * percentage / 100.0).toFloat().coerceIn(0f, barWidth)
+                        if (filledWidth > 0f) {
+                            drawRoundedRect(canvas, barStartX, currentY, barStartX + filledWidth, currentY + barHeight, 4f, categoryColor(entry.key))
+                        }
+                        currentY += 24f
+                    }
+
+                    if (categoryTotals.size > maxCategories) {
+                        drawTextOnCanvas(canvas, "+ ${categoryTotals.size - maxCategories} more categories", MARGIN, currentY + 2f, paint(TEXT_SECONDARY, 9f))
+                    }
+                }
+
+                drawFooter(canvas, 1, totalPages)
+            }
+
+            // ---------------------------------------------------------
+            // TRANSACTION TABLE PAGE
+            // ---------------------------------------------------------
+            val dateWidth = 75f
+            val categoryWidth = 100f
+            val amountWidth = 105f
+            val descriptionWidth = CONTENT_WIDTH - dateWidth - categoryWidth - amountWidth
+            val colDate = MARGIN
+            val colDescription = colDate + dateWidth
+            val colCategory = colDescription + descriptionWidth
+
+            fun drawTransactionPage(canvas: Canvas, pageNumber: Int, pageTransactions: List<TransactionEntity>) {
+                canvas.drawColor(WHITE)
+
+                // Running header
+                drawTextOnCanvas(canvas, "QUANTIFY", MARGIN, 42f, paint(NAVY, 11f, true))
+                drawRightText(canvas, reportPeriod.uppercase(locale), PAGE_WIDTH.toFloat() - MARGIN, 43f, paint(TEXT_SECONDARY, 9f, true))
+                canvas.drawLine(MARGIN, 66f, PAGE_WIDTH.toFloat() - MARGIN, 66f, paint(BORDER, 1f))
+                drawTextOnCanvas(canvas, "Transaction History", MARGIN, 89f, paint(TEXT_PRIMARY, 19f, true))
+                drawTextOnCanvas(canvas, "${pageTransactions.size} transactions", MARGIN, 117f, paint(TEXT_SECONDARY, 9f))
+
+                // Header background
+                drawRoundedRect(canvas, MARGIN, tableTop.toFloat(), PAGE_WIDTH.toFloat() - MARGIN, tableTop + tableHeaderHeight, 5f, NAVY)
+                val headerTop = tableTop + 9f
+                drawTextOnCanvas(canvas, "DATE", colDate + 5f, headerTop, paint(WHITE, 8f, true))
+                drawTextOnCanvas(canvas, "DESCRIPTION", colDescription + 5f, headerTop, paint(WHITE, 8f, true))
+                drawTextOnCanvas(canvas, "CATEGORY", colCategory + 5f, headerTop, paint(WHITE, 8f, true))
+                drawRightText(canvas, "AMOUNT", PAGE_WIDTH.toFloat() - MARGIN - 5f, headerTop, paint(WHITE, 8f, true))
+
+                // Rows
+                var currentY = tableTop + tableHeaderHeight
+                pageTransactions.forEachIndexed { index, transaction ->
+                    val rowTop = currentY
+                    val rowBottom = rowTop + rowHeight
+
+                    // Alternating backgrounds
+                    if (index % 2 == 1) {
+                        canvas.drawRect(MARGIN, rowTop, PAGE_WIDTH.toFloat() - MARGIN, rowBottom, paint(ROW_ALT))
+                    }
+
+                    // Bottom divider
+                    canvas.drawLine(MARGIN, rowBottom, PAGE_WIDTH.toFloat() - MARGIN, rowBottom, paint(BORDER, 0.6f))
+
+                    val textTop = rowTop + 10f
+
+                    // Date
+                    drawTextOnCanvas(canvas, formatDate(transaction.dateEpochSeconds), colDate + 5f, textTop, paint(TEXT_SECONDARY, 8f))
+
+                    // Description
+                    val description = transaction.description?.takeIf { it.isNotBlank() } ?: "No description"
+                    val maxDescriptionWidth = descriptionWidth - 14f
+                    val descriptionPaint = paint(TEXT_PRIMARY, 9f, true)
+                    val displayDescription = if (descriptionPaint.measureText(description) > maxDescriptionWidth) {
+                        var shortened = description
+                        while (shortened.isNotEmpty() && descriptionPaint.measureText("$shortened\u2026") > maxDescriptionWidth) {
+                            shortened = shortened.dropLast(1)
+                        }
+                        "$shortened\u2026"
+                    } else {
+                        description
+                    }
+                    drawTextOnCanvas(canvas, displayDescription, colDescription + 5f, textTop, descriptionPaint)
+
+                    // Category
+                    val category = categoryName(transaction.categoryId)
+                    val dotP = paint(categoryColor(transaction.categoryId))
+                    canvas.drawCircle(colCategory + 7f, rowTop + rowHeight / 2f, 3f, dotP)
+                    val categoryPaint = paint(TEXT_SECONDARY, 8f)
+                    val maxCategoryWidth = categoryWidth - 22f
+                    var displayCategory = category
+                    while (displayCategory.isNotEmpty() && categoryPaint.measureText(displayCategory) > maxCategoryWidth) {
+                        displayCategory = displayCategory.dropLast(1)
+                    }
+                    if (displayCategory != category) {
+                        displayCategory = displayCategory.trimEnd() + "\u2026"
+                    }
+                    drawTextOnCanvas(canvas, displayCategory, colCategory + 16f, textTop, categoryPaint)
+
+                    // Amount
+                    val isIncome = transaction.type == "INCOME"
+                    val amountColor = if (isIncome) GREEN else RED
+                    val amountText = (if (isIncome) "+" else "-") + formatAmount(transaction.amount)
+                    drawRightText(canvas, amountText, PAGE_WIDTH.toFloat() - MARGIN - 5f, textTop, paint(amountColor, 9f, true))
+
+                    currentY = rowBottom
+                }
+
+                drawFooter(canvas, pageNumber, totalPages)
+            }
+
+            // ---------------------------------------------------------
+            // CREATE PDF PAGES
+            // ---------------------------------------------------------
+            try {
+                // Cover page
+                val coverInfo = PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, 1).create()
+                val coverPage = document.startPage(coverInfo)
+                drawCoverPage(coverPage.canvas)
+                document.finishPage(coverPage)
+
+                // Transaction pages
+                transactionsPerPage.forEachIndexed { index, pageTransactions ->
+                    val pageNumber = index + 2
+                    val pageInfo = PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, pageNumber).create()
+                    val page = document.startPage(pageInfo)
+                    drawTransactionPage(page.canvas, pageNumber, pageTransactions)
+                    document.finishPage(page)
+                }
+
+                // Write to file
+                file.outputStream().use { output ->
+                    document.writeTo(output)
+                    output.flush()
+                }
+            } finally {
+                document.close()
+            }
+        }
     }
 }

@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.AddCircleOutline
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -41,13 +42,15 @@ fun EditTransactionScreen(
     val defaultPaymentMethod by vm.defaultPaymentMethod.collectAsState()
     val loadedTransaction by vm.loadedTransaction.collectAsState()
 
-    var type by remember { mutableStateOf("EXPENSE") }
-    var amount by remember { mutableStateOf("") }
-    var description by remember { mutableStateOf("") }
-    var selectedCategoryId by remember { mutableStateOf("") } // parent or subcategory id (what gets saved)
-    var selectedParentId by remember { mutableStateOf("") }   // parent category id (for showing subs)
-    var selectedPaymentMethod by remember { mutableStateOf<String?>(null) }
-    var date by remember {
+    // Unique key per open so fields reset when navigating add → edit → add
+    val openKey = remember(transactionId, transactionId != null) { UUID.randomUUID() }
+    var type by remember(openKey) { mutableStateOf("EXPENSE") }
+    var amount by remember(openKey) { mutableStateOf("") }
+    var description by remember(openKey) { mutableStateOf("") }
+    var selectedCategoryId by remember(openKey) { mutableStateOf("") } // parent or subcategory id (what gets saved)
+    var selectedParentId by remember(openKey) { mutableStateOf("") }   // parent category id (for showing subs)
+    var selectedPaymentMethod by remember(openKey) { mutableStateOf<String?>(null) }
+    var date by remember(openKey) {
         mutableStateOf(Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()))
     }
 
@@ -64,7 +67,7 @@ fun EditTransactionScreen(
         }
     }
 
-    LaunchedEffect(loadedTransaction) {
+    LaunchedEffect(loadedTransaction, transactionId) {
         loadedTransaction?.let { txn ->
             type = txn.type
             amount = txn.amount.toString()
@@ -94,30 +97,37 @@ fun EditTransactionScreen(
         }
     }
 
+    // Add new category dialog
+    var showNewCategoryDialog by remember { mutableStateOf(false) }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text(if (transactionId != null) "Edit Transaction" else "New Transaction") },
-                navigationIcon = { IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } },
-                actions = {
-                    TextButton(onClick = {
-                        if (amount.isNotBlank() && selectedCategoryId.isNotBlank()) {
-                            val txn = TransactionEntity(
-                                id = transactionId ?: UUID.randomUUID().toString(),
-                                amount = amount.toDoubleOrNull() ?: 0.0,
-                                type = type,
-                                categoryId = selectedCategoryId,
-                                paymentMethodId = selectedPaymentMethod,
-                                description = description,
-                                dateEpochSeconds = date.toInstant(TimeZone.currentSystemDefault()).epochSeconds
-                            )
-                            if (transactionId != null) vm.updateTransaction(txn) else vm.addTransaction(txn)
-                            onClose()
-                        }
-                    }, enabled = selectedCategoryId.isNotBlank()) {
-                        Icon(Icons.Default.Check, contentDescription = "Save")
-                    }
-                }
+                navigationIcon = { IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } }
+            )
+        },
+        floatingActionButton = {
+            val enabled = amount.isNotBlank() && selectedCategoryId.isNotBlank()
+            ExtendedFloatingActionButton(
+                onClick = {
+                    if (!enabled) return@ExtendedFloatingActionButton
+                    val txn = TransactionEntity(
+                        id = transactionId ?: UUID.randomUUID().toString(),
+                        amount = amount.toDoubleOrNull() ?: 0.0,
+                        type = type,
+                        categoryId = selectedCategoryId,
+                        paymentMethodId = selectedPaymentMethod,
+                        description = description,
+                        dateEpochSeconds = date.toInstant(TimeZone.currentSystemDefault()).epochSeconds
+                    )
+                    if (transactionId != null) vm.updateTransaction(txn) else vm.addTransaction(txn)
+                    onClose()
+                },
+                icon = { Icon(Icons.Default.Check, contentDescription = null) },
+                text = { Text(if (transactionId != null) "Update" else "Save") },
+                containerColor = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest,
+                contentColor = if (enabled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     ) { padding ->
@@ -198,15 +208,33 @@ fun EditTransactionScreen(
             Spacer(modifier = Modifier.height(16.dp))
             Text("Category", modifier = Modifier.padding(start = 16.dp), style = MaterialTheme.typography.labelLarge)
             Column(modifier = Modifier.padding(horizontal = 16.dp)) {
-                wrapChipsIntoRows(topLevelCategories) { cat ->
-                    FilterChip(
-                        selected = cat.id == selectedParentId,
-                        onClick = {
-                            selectedParentId = cat.id
-                            selectedCategoryId = cat.id
-                        },
-                        label = { Text(cat.name) }
-                    )
+                val chipsWithAddNew = topLevelCategories + ("+ ADD NEW")
+                wrapChipsIntoRows(chipsWithAddNew) { cat ->
+                    when {
+                        cat == "+ ADD NEW" -> {
+                            FilterChip(
+                                selected = false,
+                                onClick = { showNewCategoryDialog = true },
+                                label = {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Icon(Icons.Default.AddCircleOutline, contentDescription = null, modifier = androidx.compose.ui.Modifier.size(16.dp))
+                                        Text("Add New")
+                                    }
+                                }
+                            )
+                        }
+                        else -> {
+                            val c = cat as CategoryEntity
+                            FilterChip(
+                                selected = c.id == selectedParentId,
+                                onClick = {
+                                    selectedParentId = c.id
+                                    selectedCategoryId = c.id
+                                },
+                                label = { Text(c.name) }
+                            )
+                        }
+                    }
                 }
             }
             if (topLevelCategories.isEmpty()) {
@@ -247,6 +275,49 @@ fun EditTransactionScreen(
             Spacer(modifier = Modifier.height(32.dp))
         }
     }
+
+    // Add new category dialog
+    if (showNewCategoryDialog) {
+        var newName by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showNewCategoryDialog = false },
+            title = { Text("New Category") },
+            text = {
+                OutlinedTextField(
+                    value = newName,
+                    onValueChange = { newName = it },
+                    label = { Text("Name") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (newName.isNotBlank()) {
+                            val newId = UUID.randomUUID().toString()
+                            vm.addCategory(CategoryEntity(
+                                id = newId,
+                                name = newName,
+                                type = type,
+                                color = 0xFF4C662BL,
+                                icon = "",
+                                isDefault = false,
+                                parentId = null
+                            ))
+                            selectedParentId = newId
+                            selectedCategoryId = newId
+                            showNewCategoryDialog = false
+                        }
+                    },
+                    enabled = newName.isNotBlank()
+                ) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showNewCategoryDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
 }
 
 /**
@@ -273,7 +344,7 @@ private fun <T> wrapChipsIntoRows(
 
     val rows = items.chunked(itemsPerRow)
     rows.forEachIndexed { rowIndex, rowItems ->
-        if (rowIndex > 0) Spacer(modifier = Modifier.height(8.dp))
+        if (rowIndex > 0) Spacer(modifier = Modifier.height(2.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             rowItems.forEach { item -> content(item) }
         }

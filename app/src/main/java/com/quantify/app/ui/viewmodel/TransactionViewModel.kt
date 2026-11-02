@@ -100,6 +100,10 @@ class TransactionViewModel @Inject constructor(
         }
     }
 
+    fun clearLoadedTransaction() {
+        _loadedTransaction.value = null
+    }
+
     fun addTransaction(transaction: TransactionEntity) {
         viewModelScope.launch {
             transactionRepository.insert(transaction)
@@ -131,13 +135,52 @@ class TransactionViewModel @Inject constructor(
         }
     }
 
+    private val _deleteCategoryMessage = MutableStateFlow<String?>(null)
+    val deleteCategoryMessage: StateFlow<String?> = _deleteCategoryMessage.asStateFlow()
+
+    fun clearDeleteCategoryMessage() {
+        _deleteCategoryMessage.value = null
+    }
+
     fun deleteCategory(category: CategoryEntity) {
         viewModelScope.launch {
             // Skip deletion of system (isDefault) categories
-            if (category.isDefault) return@launch
+            if (category.isDefault) {
+                _deleteCategoryMessage.value = "Cannot delete default category"
+                return@launch
+            }
 
-            val fallbackCategory = categoryRepository.getByTypeAndIsDefault(category.type)
-                ?: return@launch  // no "Other" category found
+            // Find a fallback: prefer "Other", then any other category of the same type
+            val allCategories = categories.value
+            val otherFallback = allCategories.find { it.type == category.type && it.isDefault && it.parentId == null }
+            val anyFallback = allCategories.find { it.type == category.type && it.parentId == null && it.id != category.id }
+            val fallbackCategory = otherFallback ?: anyFallback
+
+            if (fallbackCategory == null) {
+                // Last category of this type — create "Other" on the fly
+                val newFallback = CategoryEntity(
+                    id = if (category.type == "EXPENSE") "other" else "inc_other",
+                    name = if (category.type == "EXPENSE") "Other" else "Other Income",
+                    type = category.type,
+                    color = 0xFF607D8BL,
+                    icon = "more_horiz",
+                    isDefault = true
+                )
+                categoryRepository.insert(newFallback)
+
+                // Collect all category IDs and reassign transactions
+                val subCategories = categoryRepository.getByParentId(category.id)
+                val categoryIds = listOf(category.id) + subCategories.map { it.id }
+                for (cid in categoryIds) {
+                    transactionRepository.updateCategoryId(cid, newFallback.id)
+                }
+                categoryRepository.delete(category)
+                for (sub in subCategories) {
+                    categoryRepository.delete(sub)
+                }
+                _deleteCategoryMessage.value = "\"${category.name}\" deleted"
+                return@launch
+            }
 
             // Collect all category IDs: the category itself + its subcategories
             val subCategories = categoryRepository.getByParentId(category.id)
@@ -153,6 +196,8 @@ class TransactionViewModel @Inject constructor(
             for (sub in subCategories) {
                 categoryRepository.delete(sub)
             }
+
+            _deleteCategoryMessage.value = "\"${category.name}\" deleted"
         }
     }
 

@@ -1,5 +1,6 @@
 package com.quantify.app
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -8,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ReceiptLong
@@ -34,6 +36,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.quantify.app.ui.backup.BackupViewModel
 import com.quantify.app.ui.screens.csvimport.CsvImportScreen
@@ -58,6 +61,7 @@ private data class BottomNavItem(
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
         setContent {
             AppContent()
         }
@@ -100,6 +104,59 @@ private fun AppContentInner(backupViewModel: BackupViewModel, currentTheme: Stri
     val dashboardViewModel: DashboardViewModel = hiltViewModel(activity)
     val transactionViewModel: TransactionViewModel = hiltViewModel(activity)
 
+    // Month name for the PDF filename
+    val monthNames = remember {
+        listOf("January", "February", "March", "April", "May", "June",
+            "July", "August", "September", "October", "November", "December")
+    }
+    val selectedYear by transactionViewModel.selectedYearFlow.collectAsState()
+    val selectedMonth by transactionViewModel.selectedMonthFlow.collectAsState()
+    val monthName = if (selectedMonth in 1..12) monthNames[selectedMonth - 1] else ""
+
+    fun sharePdf() {
+        val fileName = "Quantify_${monthName}_${selectedYear}.pdf"
+        val file = java.io.File(activity.cacheDir, fileName)
+        val year = transactionViewModel.selectedYear
+        val month = transactionViewModel.selectedMonth
+        backupViewModel.generatePdf(
+            transactions = transactionViewModel.transactionsByMonth.value,
+            categories = transactionViewModel.categories.value,
+            year = year,
+            month = month,
+            currency = backupViewModel.currency.value,
+            file = file
+        )
+        val uri = FileProvider.getUriForFile(
+            activity, "${activity.packageName}.fileprovider", file
+        )
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "application/pdf"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_SUBJECT, "Quantify - $monthName $year")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        activity.startActivity(
+            Intent.createChooser(shareIntent, "Share PDF").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+    }
+
+    // Handle back press: close overlays, then navigate to Home, then exit
+    BackHandler(enabled = showAddTransaction || editTransactionId != null || showCsvImport) {
+        if (showAddTransaction) {
+            showAddTransaction = false
+        } else if (editTransactionId != null) {
+            editTransactionId = null
+            transactionViewModel.clearLoadedTransaction()
+        } else if (showCsvImport) {
+            showCsvImport = false
+        }
+    }
+
+    BackHandler(enabled = pagerState.currentPage != 0 && !showAddTransaction && editTransactionId == null && !showCsvImport) {
+        scope.launch { pagerState.scrollToPage(0) }
+        transactionViewModel.clearFilterCategory()
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
             // Pager + overlays confined to weighted space — cannot cover the nav bar
@@ -112,7 +169,9 @@ private fun AppContentInner(backupViewModel: BackupViewModel, currentTheme: Stri
                             onNavigateToCategory = { categoryId ->
                                 transactionViewModel.setFilterCategoryId(categoryId)
                                 scope.launch { pagerState.scrollToPage(1) }
-                            }
+                            },
+                            onSharePdf = { sharePdf() },
+                            onAddTransaction = { showAddTransaction = true }
                         )
                         1 -> TransactionsScreen(
                             viewModel = transactionViewModel,
@@ -127,7 +186,8 @@ private fun AppContentInner(backupViewModel: BackupViewModel, currentTheme: Stri
                             onBack = {
                                 transactionViewModel.clearFilterCategory()
                                 scope.launch { pagerState.scrollToPage(0) }
-                            }
+                            },
+                            onSharePdf = { sharePdf() }
                         )
                         2 -> StatsScreen(viewModel = dashboardViewModel)
                         3 -> ManageScreen(
@@ -148,7 +208,10 @@ private fun AppContentInner(backupViewModel: BackupViewModel, currentTheme: Stri
                 if (editTransactionId != null) {
                     EditTransactionScreen(
                         transactionId = editTransactionId,
-                        onClose = { editTransactionId = null },
+                        onClose = {
+                            editTransactionId = null
+                            transactionViewModel.clearLoadedTransaction()
+                        },
                         transactionViewModel = transactionViewModel
                     )
                 }

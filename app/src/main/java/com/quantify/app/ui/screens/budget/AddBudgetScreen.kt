@@ -24,6 +24,7 @@ import kotlinx.datetime.toLocalDateTime
 fun AddBudgetScreen(
     onClose: () -> Unit,
     editBudget: BudgetEntity? = null,
+    initialParentCategoryId: String? = null,
     viewModel: BudgetViewModel = hiltViewModel()
 ) {
     val categories by viewModel.categories.collectAsState()
@@ -33,15 +34,17 @@ fun AddBudgetScreen(
     val categoryParentMap = categories.filter { it.parentId != null }.associate { it.id to it.parentId!! }
 
     var amount by remember { mutableStateOf(editBudget?.amount?.toString() ?: "") }
-    var selectedParentId by remember {
+    var selectedParentId by remember(editBudget, initialParentCategoryId, categoryParentMap) {
         mutableStateOf<String>(
             editBudget?.let { budget ->
                 // Find the parent of the edited category, or use the category itself if top-level
                 categoryParentMap[budget.categoryId] ?: budget.categoryId
-            } ?: ""
+            } ?: initialParentCategoryId.orEmpty()
         )
     }
-    var selectedCategoryId by remember { mutableStateOf(editBudget?.categoryId ?: "") }
+    var selectedCategoryId by remember(editBudget, initialParentCategoryId) {
+        mutableStateOf(editBudget?.categoryId.orEmpty())
+    }
 
     val subCategories = categories.filter { it.parentId == selectedParentId }
 
@@ -51,11 +54,15 @@ fun AddBudgetScreen(
     val (parentBudgetAmount, siblingSubBudgetTotal) =
         if (selectedParentId.isNotBlank()) viewModel.getParentBudgetInfo(selectedParentId) else Pair(0.0, 0.0)
 
-    val remainingSubBudget = parentBudgetAmount - siblingSubBudgetTotal
+    val editingSubcategoryAmount = editBudget
+        ?.takeIf { categoryParentMap[it.categoryId] == selectedParentId }
+        ?.amount
+        ?: 0.0
+    val remainingSubBudget = parentBudgetAmount - siblingSubBudgetTotal + editingSubcategoryAmount
     val inputAmount = amount.toDoubleOrNull() ?: 0.0
 
     // For subcategory: parent must have a budget and input must fit within remaining
-    val isSubcategoryBudget = selectedCategoryId != selectedParentId
+    val isSubcategoryBudget = selectedCategoryId.isNotEmpty() && selectedCategoryId != selectedParentId
     val parentConstraintSatisfied = !isSubcategoryBudget || (parentBudgetAmount > 0 && inputAmount <= remainingSubBudget)
 
     val enabled = amount.isNotBlank() && selectedCategoryId.isNotEmpty() && parentConstraintSatisfied
@@ -114,8 +121,14 @@ fun AddBudgetScreen(
             // Sub-category (horizontal chips, optional)
             if (subCategories.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(8.dp))
-                Text("Sub-category (optional)", modifier = Modifier.padding(start = 16.dp),
+                Text("Subcategory", modifier = Modifier.padding(start = 16.dp),
                     style = MaterialTheme.typography.labelLarge)
+                if (initialParentCategoryId != null && editBudget == null) {
+                    Text("Choose the subcategory to give it its own limit.",
+                        modifier = Modifier.padding(start = 16.dp, top = 2.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 Column(modifier = Modifier.padding(horizontal = 16.dp)) {
                     wrapChipsIntoRows(subCategories) { sub ->
                         FilterChip(

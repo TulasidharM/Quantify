@@ -38,14 +38,17 @@ import kotlinx.datetime.toLocalDateTime
 fun BudgetScreen(
     onClose: () -> Unit = {},
     onAddBudget: () -> Unit = {},
+    onAddSubcategoryBudget: (String) -> Unit = {},
     onEditBudget: (BudgetEntity) -> Unit = {},
     viewModel: BudgetViewModel = hiltViewModel()
 ) {
     val budgets by viewModel.budgets.collectAsState()
     val categories by viewModel.categories.collectAsState()
 
-    val currentYear = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).year
-    val currentMonth = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).monthNumber
+    val currentDate = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+    val currentYear = currentDate.year
+    val monthLabel = currentDate.month.name.lowercase()
+        .replaceFirstChar { it.uppercase() }
 
     val topLevelCategories = categories.filter { it.parentId == null }
 
@@ -65,8 +68,11 @@ fun BudgetScreen(
     }
 
     // Summary totals
-    val totalBudget = budgets.sumOf { it.budget.amount }
-    val totalSpent = budgets.sumOf { it.spent }
+    // A parent's spending already includes its subcategories, so count either the parent
+    // budget or standalone subcategory budgets in the overall totals, never both.
+    val summaryBudgets = parentBudgetEntries.map { budgetMap.getValue(it.id) } + orphanSubBudgets
+    val totalBudget = summaryBudgets.sumOf { it.budget.amount }
+    val totalSpent = summaryBudgets.sumOf { it.spent }
     val totalRemaining = totalBudget - totalSpent
     val overallRatio = if (totalBudget > 0) (totalSpent / totalBudget).coerceIn(0.0, 1.0) else 0.0
     val overallOverBudget = totalSpent > totalBudget
@@ -87,7 +93,11 @@ fun BudgetScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
-                actions = { Text("$currentYear / $currentMonth", style = MaterialTheme.typography.bodySmall) }
+                actions = {
+                    Text("$monthLabel $currentYear", style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(end = 16.dp))
+                }
             )
         },
         floatingActionButton = {
@@ -96,12 +106,32 @@ fun BudgetScreen(
             }
         }
     ) { padding ->
-        LazyColumn(modifier = Modifier.padding(padding)) {
+        LazyColumn(
+            modifier = Modifier.padding(padding),
+            contentPadding = PaddingValues(top = 8.dp, bottom = 96.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
             if (budgets.isEmpty()) {
                 item {
-                    Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                        Text("No budgets set", style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 72.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(Icons.Outlined.Savings, contentDescription = null,
+                            modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.height(16.dp))
+                        Text("Give your spending a plan", style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.height(8.dp))
+                        Text("Set a monthly limit for a category and track how much you have left.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.height(20.dp))
+                        Button(onClick = onAddBudget) {
+                            Icon(Icons.Default.Add, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Create a budget")
+                        }
                     }
                 }
             } else {
@@ -116,16 +146,21 @@ fun BudgetScreen(
                         ) {
                             Column(modifier = Modifier.padding(16.dp)) {
                                 Text(
-                                    "Total Budget",
+                                    "MONTHLY PLAN",
                                     style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    formatCurrency(totalBudget),
-                                    style = MaterialTheme.typography.headlineSmall,
+                                Row(verticalAlignment = Alignment.Bottom) {
+                                    Text(formatCurrency(totalBudget),
+                                    style = MaterialTheme.typography.headlineMedium,
                                     fontWeight = FontWeight.Bold
-                                )
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("budgeted", style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(bottom = 4.dp))
+                                }
                                 Spacer(modifier = Modifier.height(12.dp))
                                 Box(modifier = Modifier.fillMaxWidth().height(8.dp)) {
                                     Canvas(modifier = Modifier.matchParentSize()) {
@@ -153,15 +188,15 @@ fun BudgetScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
                                     Text(
-                                        "${String.format("%.0f", overallRatio * 100)}% used",
+                                        "${String.format("%.0f", if (totalBudget > 0) totalSpent / totalBudget * 100 else 0.0)}% used",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                                     )
                                     Text(
-                                        if (overallOverBudget) "Over budget!" else "${String.format("%.0f", overallRatio * 100)}% used",
+                                        if (overallOverBudget) "${formatCurrency(-totalRemaining)} over plan" else "${formatCurrency(totalRemaining)} left",
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = if (overallOverBudget) MaterialTheme.colorScheme.error
-                                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                                            color = if (overallOverBudget) MaterialTheme.colorScheme.error
+                                        else MaterialTheme.colorScheme.primary
                                     )
                                 }
                             }
@@ -238,6 +273,19 @@ fun BudgetScreen(
                     }
                 }
 
+                item("budget-section-title") {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Category budgets", style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                        Text("${budgets.size} ${if (budgets.size == 1) "category" else "categories"}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+
                 // Parent budget entries
                 parentBudgetEntries.forEach { parentCat ->
                     val parentBudgetWs = budgetMap[parentCat.id]!!
@@ -256,6 +304,8 @@ fun BudgetScreen(
                             parentBudget = parentBudgetWs,
                             categoryName = parentCat.name,
                             childBudgets = childList,
+                            canAddSubcategoryBudget = categories.any { it.parentId == parentCat.id },
+                            onAddSubcategoryBudget = { onAddSubcategoryBudget(parentCat.id) },
                             onDeleteParent = { viewModel.deleteBudget(parentBudgetWs.budget) },
                             onDeleteChild = { budget: BudgetEntity -> viewModel.deleteBudget(budget) },
                             onEditParent = { onEditBudget(parentBudgetWs.budget) },
@@ -323,7 +373,7 @@ private fun OrphanBudgetCard(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                IconButton(onClick = onEdit, modifier = Modifier.padding(start = 2.dp)) {
+                IconButton(onClick = onEdit, modifier = Modifier.size(32.dp)) {
                     Icon(
                         Icons.Default.Edit,
                         contentDescription = "Edit",
@@ -331,7 +381,7 @@ private fun OrphanBudgetCard(
                         modifier = Modifier.size(18.dp)
                     )
                 }
-                IconButton(onClick = onDelete) {
+                IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
                     Icon(
                         Icons.Outlined.DeleteOutline,
                         contentDescription = "Delete",
@@ -379,6 +429,8 @@ private fun BudgetCard(
     parentBudget: BudgetRepository.BudgetWithSpending,
     categoryName: String,
     childBudgets: List<Pair<CategoryEntity, BudgetRepository.BudgetWithSpending>>,
+    canAddSubcategoryBudget: Boolean,
+    onAddSubcategoryBudget: () -> Unit,
     onDeleteParent: () -> Unit,
     onDeleteChild: (BudgetEntity) -> Unit,
     onEditParent: () -> Unit,
@@ -416,28 +468,27 @@ private fun BudgetCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                Text(
-                    "${formatCurrency(parentBudget.spent)} / ${formatCurrency(parentBudget.budget.amount)}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                IconButton(onClick = onEditParent, modifier = Modifier.padding(start = 2.dp)) {
-                    Icon(
-                        Icons.Default.Edit,
-                        contentDescription = "Edit",
-                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-                IconButton(onClick = onDeleteParent) {
-                    Icon(
-                        Icons.Outlined.DeleteOutline,
-                        contentDescription = "Delete",
-                        tint = MaterialTheme.colorScheme.error.copy(alpha = 0.5f),
-                        modifier = Modifier.size(20.dp)
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (canAddSubcategoryBudget) {
+                        IconButton(onClick = onAddSubcategoryBudget, modifier = Modifier.size(40.dp)) {
+                            Icon(Icons.Default.Add,
+                                contentDescription = "Add subcategory budget for $categoryName",
+                                tint = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                    IconButton(onClick = onDeleteParent, modifier = Modifier.size(40.dp)) {
+                        Icon(Icons.Outlined.DeleteOutline, contentDescription = "Delete $categoryName budget",
+                            tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
+                            modifier = Modifier.size(20.dp))
+                    }
                 }
             }
+
+            Text(
+                "${formatCurrency(parentBudget.spent)} / ${formatCurrency(parentBudget.budget.amount)}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
 
             Spacer(modifier = Modifier.height(12.dp))
 
@@ -531,12 +582,7 @@ private fun SubBudgetRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                Text(
-                    "${formatCurrency(budgetWithSpending.spent)} / ${formatCurrency(budgetWithSpending.budget.amount)}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                IconButton(onClick = onEdit, modifier = Modifier.padding(start = 2.dp)) {
+                IconButton(onClick = onEdit, modifier = Modifier.size(32.dp)) {
                     Icon(
                         Icons.Default.Edit,
                         contentDescription = "Edit",
@@ -544,7 +590,7 @@ private fun SubBudgetRow(
                         modifier = Modifier.size(16.dp)
                     )
                 }
-                IconButton(onClick = onDelete) {
+                IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
                     Icon(
                         Icons.Default.Close,
                         contentDescription = "Delete",
@@ -553,6 +599,12 @@ private fun SubBudgetRow(
                     )
                 }
             }
+
+            Text(
+                "${formatCurrency(budgetWithSpending.spent)} / ${formatCurrency(budgetWithSpending.budget.amount)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
 
             Spacer(modifier = Modifier.height(4.dp))
 

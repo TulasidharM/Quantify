@@ -109,12 +109,16 @@ private fun AppContentInner(backupViewModel: BackupViewModel, currentTheme: Stri
     var showBudget by remember { mutableStateOf(false) }
     var showAddBudget by remember { mutableStateOf(false) }
     var editingBudget by remember { mutableStateOf<BudgetEntity?>(null) }
+    var budgetParentCategoryId by remember { mutableStateOf<String?>(null) }
     var showWishlist by remember { mutableStateOf(false) }
     var showAddWishlist by remember { mutableStateOf(false) }
 
     // Activity-scoped ViewModels — scoped to the Activity so Dashboard + Stats share one instance
     val dashboardViewModel: DashboardViewModel = hiltViewModel(activity)
     val transactionViewModel: TransactionViewModel = hiltViewModel(activity)
+    val dashboardBudgetedTotal by dashboardViewModel.monthlyBudgetedTotal.collectAsState()
+    val dashboardYear by dashboardViewModel.selectedYearFlow.collectAsState()
+    val dashboardMonth by dashboardViewModel.selectedMonthFlow.collectAsState()
 
     // Month name for the PDF filename
     val monthNames = remember {
@@ -254,20 +258,29 @@ private fun AppContentInner(backupViewModel: BackupViewModel, currentTheme: Stri
                 if (showBudget) {
                     BudgetScreen(
                         onClose = { showBudget = false; editingBudget = null },
-                        onAddBudget = { editingBudget = null; showAddBudget = true },
+                        onAddBudget = { editingBudget = null; budgetParentCategoryId = null; showAddBudget = true },
+                        onAddSubcategoryBudget = { categoryId ->
+                            editingBudget = null
+                            budgetParentCategoryId = categoryId
+                            showAddBudget = true
+                        },
                         onEditBudget = { budget -> editingBudget = budget; showAddBudget = true }
                     )
                 }
                 if (showAddBudget) {
                     AddBudgetScreen(
                         onClose = { showAddBudget = false; editingBudget = null },
-                        editBudget = editingBudget
+                        editBudget = editingBudget,
+                        initialParentCategoryId = budgetParentCategoryId
                     )
                 }
                 if (showWishlist) {
                     WishlistScreen(
                         onClose = { showWishlist = false },
-                        onAddItem = { showAddWishlist = true }
+                        onAddItem = { showAddWishlist = true },
+                        monthlyBudgetedTotal = dashboardBudgetedTotal,
+                        selectedYear = dashboardYear,
+                        selectedMonth = dashboardMonth
                     )
                 }
                 if (showAddWishlist) {

@@ -6,6 +6,7 @@ import com.quantify.app.data.local.dao.MonthlyTrendRow
 import com.quantify.app.data.local.entity.CategoryEntity
 import com.quantify.app.data.local.entity.TransactionEntity
 import com.quantify.app.data.repository.CategoryRepository
+import com.quantify.app.data.repository.BudgetRepository
 import com.quantify.app.data.repository.TransactionRepository
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
@@ -28,6 +29,7 @@ import javax.inject.Inject
 class DashboardViewModel @Inject constructor(
     private val transactionRepository: TransactionRepository,
     private val categoryRepository: CategoryRepository,
+    private val budgetRepository: BudgetRepository,
     private val dataStore: DataStore<Preferences>
 ) : ViewModel() {
 
@@ -79,6 +81,20 @@ class DashboardViewModel @Inject constructor(
     val monthlyIncome: StateFlow<Double> = monthlyTotals.map { it.income }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
     val monthlyExpense: StateFlow<Double> = monthlyTotals.map { it.expense }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+
+    val monthlyBudgetedTotal: StateFlow<Double> = combine(
+        selectedYearFlow, selectedMonthFlow, allCategories
+    ) { year, month, categories -> Triple(year, month, categories) }
+        .flatMapLatest { (year, month, categories) ->
+            budgetRepository.getByMonth(year, month).map { budgets ->
+                val budgetByCategory = budgets.associateBy { it.categoryId }
+                budgets.sumOf { budget ->
+                    val parentId = categories.firstOrNull { it.id == budget.categoryId }?.parentId
+                    if (parentId == null || parentId !in budgetByCategory) budget.amount else 0.0
+                }
+            }
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
 
     data class CategorySpending(val category: CategoryEntity, val amount: Double)

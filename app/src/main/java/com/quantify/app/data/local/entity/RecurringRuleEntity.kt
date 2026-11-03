@@ -16,7 +16,6 @@ data class RecurringRuleEntity(
     val categoryId: String,
     val paymentMethodId: String?,
     val description: String?,
-    val tags: String = "",
     val frequency: String, // "DAILY", "WEEKLY", "MONTHLY", "YEARLY"
     val dayOfMonth: Int? = null, // for monthly/yearly
     val dayOfWeek: Int? = null, // for weekly (0=Sunday..6=Saturday)

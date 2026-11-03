@@ -5,10 +5,11 @@ import androidx.room.PrimaryKey
 import kotlinx.serialization.Serializable
 
 @Serializable
-@Entity(tableName = "tags")
-data class TagEntity(
+@Entity(tableName = "wishlist_items")
+data class WishlistItemEntity(
     @PrimaryKey
     val id: String,
     val name: String,
-    val color: Long = 0xFF000000L
+    val targetAmount: Double,
+    val createdAt: Long = System.currentTimeMillis()
 )

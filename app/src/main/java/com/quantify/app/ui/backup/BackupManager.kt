@@ -14,8 +14,7 @@ class BackupManager(
     private val categoryRepository: CategoryRepository,
     private val paymentMethodRepository: PaymentMethodRepository,
     private val budgetRepository: BudgetRepository,
-    private val recurringRuleRepository: RecurringRuleRepository,
-    private val tagRepository: TagRepository
+    private val recurringRuleRepository: RecurringRuleRepository
 ) {
     suspend fun createBackupStream(): OutputStream {
         return withContext(Dispatchers.IO) {

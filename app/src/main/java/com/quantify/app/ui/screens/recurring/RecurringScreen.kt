@@ -97,7 +97,7 @@ fun NewRecurringRuleDialog(
                     FilterChip(selected = type == "INCOME", onClick = { type = "INCOME" }, label = { Text("Income") })
                 }
                 Spacer(modifier = Modifier.height(8.dp))
-                OutlinedTextField(value = amount, onValueChange = { amount = it }, label = { Text("Amount") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                OutlinedTextField(value = amount, onValueChange = { amount = it.filter { c -> c.isDigit() || c == '.' } }, label = { Text("Amount") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(value = description, onValueChange = { description = it }, label = { Text("Description") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                 Spacer(modifier = Modifier.height(8.dp))

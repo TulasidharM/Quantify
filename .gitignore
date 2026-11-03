@@ -33,3 +33,6 @@ Thumbs.db
 
 # Local properties
 local.properties
+
+# Qwen Code
+.qwen/

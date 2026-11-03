@@ -2,7 +2,6 @@ package com.quantify.app.ui.screens.manage
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -17,7 +16,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -27,25 +25,22 @@ import com.quantify.app.ui.backup.BackupViewModel
 import com.quantify.app.ui.theme.THEMES
 import com.quantify.app.ui.theme.ThemeEntry
 import com.quantify.app.ui.viewmodel.TransactionViewModel
-import kotlinx.coroutines.launch
 import java.util.UUID
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ManageScreen(
     onCsvImport: () -> Unit = {},
+    onCategories: () -> Unit = {},
     transactionViewModel: TransactionViewModel = hiltViewModel(),
     backupViewModel: BackupViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
-    val categories by transactionViewModel.categories.collectAsState()
     val paymentMethods by transactionViewModel.paymentMethods.collectAsState()
     val defaultPaymentMethod by transactionViewModel.defaultPaymentMethod.collectAsState()
     val currency by backupViewModel.currency.collectAsState()
 
-    var showCategoryDialog by remember { mutableStateOf(false) }
-    var categoryDialogParentId by remember { mutableStateOf<String?>(null) }
-    var categoryDialogType by remember { mutableStateOf("EXPENSE") }
     var showPaymentMethodDialog by remember { mutableStateOf(false) }
     var showCurrencyDialog by remember { mutableStateOf(false) }
     var showThemeDialog by remember { mutableStateOf(false) }
@@ -56,13 +51,6 @@ fun ManageScreen(
     val currentTheme = remember(themeKey) { THEMES.firstOrNull { it.key == themeKey } ?: THEMES[0] }
 
     val scope = rememberCoroutineScope()
-
-    val parentCategories = remember(categories) {
-        categories.filter { it.parentId == null }.sortedBy { it.name.lowercase() }
-    }
-    val childCategories = remember(categories) {
-        categories.filter { it.parentId != null }.sortedBy { it.parentId ?: "" + it.name.lowercase() }
-    }
 
     val backupLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         uri?.let { scope.launch { backupViewModel.exportBackup(it) } }
@@ -102,68 +90,14 @@ fun ManageScreen(
         LazyColumn(modifier = Modifier.padding(padding)) {
             // Categories section
             item { SectionHeader("Categories") }
-            items(parentCategories, key = { it.id }) { parent ->
-                val dotColor = if (parent.type == "INCOME") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-                ListItem(
-                    headlineContent = { Text(parent.name) },
-                    supportingContent = { Text(parent.type) },
-                    leadingContent = {
-                        Canvas(modifier = Modifier.size(8.dp), onDraw = {
-                            drawCircle(dotColor)
-                        })
-                    },
-                    trailingContent = {
-                        Row {
-                            IconButton(onClick = {
-                                categoryDialogParentId = parent.id
-                                categoryDialogType = parent.type
-                                showCategoryDialog = true
-                            }) {
-                                Icon(Icons.Default.Add, contentDescription = "Add subcategory", tint = MaterialTheme.colorScheme.primary)
-                            }
-                            if (!parent.isDefault) {
-                                IconButton(onClick = { transactionViewModel.deleteCategory(parent) }) {
-                                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
-                                }
-                            }
-                        }
-                    }
-                )
-                val children = childCategories.filter { it.parentId == parent.id }
-                val subDotColor = MaterialTheme.colorScheme.onSurfaceVariant
-                children.forEach { child ->
-                    ListItem(
-                        headlineContent = { Text(child.name, modifier = Modifier.padding(start = 28.dp)) },
-                        supportingContent = {
-                            Text("Sub-category of " + parent.name, modifier = Modifier.padding(start = 28.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        },
-                        leadingContent = {
-                            Canvas(modifier = Modifier.size(6.dp).padding(start = 14.dp), onDraw = {
-                                drawCircle(subDotColor, radius = 3f)
-                            })
-                        },
-                        trailingContent = {
-                            if (!child.isDefault) {
-                                IconButton(onClick = { transactionViewModel.deleteCategory(child) }) {
-                                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error)
-                                }
-                            }
-                        }
-                    )
-                }
-            }
             item {
                 ListItem(
-                    leadingContent = { Icon(Icons.Default.Add, contentDescription = "Add") },
-                    headlineContent = { Text("Add Category") },
+                    leadingContent = { Icon(Icons.Default.Category, contentDescription = null) },
+                    headlineContent = { Text("Manage Categories") },
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp)
-                        .clickable(onClick = {
-                            categoryDialogParentId = null
-                            categoryDialogType = "EXPENSE"
-                            showCategoryDialog = true
-                        })
+                        .clickable(onClick = onCategories)
                 )
             }
 
@@ -304,32 +238,6 @@ fun ManageScreen(
     }
 
     // Dialogs
-    if (showCategoryDialog) {
-        NewCategoryDialog(
-            onDismiss = {
-                showCategoryDialog = false
-                categoryDialogParentId = null
-                categoryDialogType = "EXPENSE"
-            },
-            onSave = { name, type, parentId ->
-                transactionViewModel.addCategory(CategoryEntity(
-                    id = UUID.randomUUID().toString(),
-                    name = name,
-                    type = type,
-                    color = 0xFF4C662B,
-                    icon = "",
-                    isDefault = false,
-                    parentId = parentId
-                ))
-                showCategoryDialog = false
-                categoryDialogParentId = null
-                categoryDialogType = "EXPENSE"
-            },
-            parentCategories = categories,
-            initialParentId = categoryDialogParentId,
-            initialType = categoryDialogType
-        )
-    }
     if (showPaymentMethodDialog) {
         NewPaymentMethodDialog(
             onDismiss = { showPaymentMethodDialog = false },

@@ -304,8 +304,7 @@ class CsvImportViewModel @Inject constructor(
                         categoryId = categoryId,
                         paymentMethodId = cl.paymentMethodId,
                         description = if (cl.label.isNotBlank()) cl.label else row.vendor,
-                        dateEpochSeconds = epoch,
-                        tags = ""
+                        dateEpochSeconds = epoch
                     )
                     Log.d("CsvImport", "Inserting txn row=$i amount=${row.amount} catId=$categoryId epoch=$epoch")
                     transactionRepository.insert(txn)

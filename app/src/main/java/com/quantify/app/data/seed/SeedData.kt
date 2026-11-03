@@ -1,10 +1,8 @@
 package com.quantify.app.data.seed
 
-import android.content.Context
 import com.quantify.app.data.local.QuantifyDatabase
 import com.quantify.app.data.local.entity.CategoryEntity
 import com.quantify.app.data.local.entity.PaymentMethodEntity
-import com.quantify.app.data.local.entity.TagEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -12,7 +10,9 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class SeedData @Inject constructor() {
+class SeedData @Inject constructor(
+    private val db: QuantifyDatabase
+) {
 
     private val defaultExpenseCategories = listOf(
         Triple("Food & Dining", 0xFFFF5722L, "restaurant"),
@@ -87,17 +87,8 @@ class SeedData @Inject constructor() {
 
     private val defaultPaymentMethods = listOf("UPI", "Cash", "Credit Card", "Debit Card", "Bank Transfer", "Wallet")
 
-    private val defaultTags = listOf(
-        "Recurring" to 0xFF2196F3L,
-        "Essential" to 0xFF4CAF50L,
-        "Luxury" to 0xFFFF9800L,
-        "Work" to 0xFF9C27B0L,
-        "Family" to 0xFFE91E63L
-    )
-
-    suspend fun seedIfEmpty(context: Context) {
+    suspend fun seedIfEmpty() {
         withContext(Dispatchers.IO) {
-            val db = QuantifyDatabase.getInstance(context)
             val existing = db.categoryDao().getAll().first()
             if (existing.isEmpty()) {
                 // Seed expense categories
@@ -152,14 +143,6 @@ class SeedData @Inject constructor() {
                         id = name.lowercase().replace(" ", "_"),
                         name = name,
                         isDefault = index == 0
-                    ))
-                }
-                // Seed tags
-                defaultTags.forEach { (name, color) ->
-                    db.tagDao().insert(TagEntity(
-                        id = name.lowercase(),
-                        name = name,
-                        color = color
                     ))
                 }
             }

@@ -46,7 +46,7 @@ data class BackupFile(
     val paymentMethods: List<PaymentMethodEntity>,
     val budgets: List<BudgetEntity>,
     val recurringRules: List<RecurringRuleEntity>,
-    val tags: List<TagEntity>
+    val wishlistItems: List<WishlistItemEntity> = emptyList()
 )
 
 @HiltViewModel
@@ -57,7 +57,7 @@ class BackupViewModel @Inject constructor(
     private val paymentMethodRepository: PaymentMethodRepository,
     private val budgetRepository: BudgetRepository,
     private val recurringRuleRepository: RecurringRuleRepository,
-    private val tagRepository: TagRepository,
+    private val wishlistItemRepository: WishlistItemRepository,
     private val dataStore: DataStore<Preferences>
 ) : ViewModel() {
 
@@ -143,11 +143,11 @@ class BackupViewModel @Inject constructor(
         viewModelScope.launch {
             context.contentResolver.openOutputStream(uri)?.use { output ->
                 OutputStreamWriter(output).use { writer ->
-                    writer.write("Date,Type,Amount,Category,Description,Tags\n")
+                    writer.write("Date,Type,Amount,Category,Description\n")
                     val txns = transactionRepository.getAll().first()
                     for (txn in txns) {
                         val date = txn.date.toLocalDateTime(kotlinx.datetime.TimeZone.currentSystemDefault())
-                        writer.write("${date.year}-${date.monthNumber}-${date.dayOfMonth},${txn.type},${txn.amount},${txn.categoryId},${txn.description ?: ""},${txn.tags}\n")
+                        writer.write("${date.year}-${date.monthNumber}-${date.dayOfMonth},${txn.type},${txn.amount},${txn.categoryId},${txn.description ?: ""}\n")
                     }
                 }
             }
@@ -284,7 +284,7 @@ class BackupViewModel @Inject constructor(
                 kotlinx.datetime.Clock.System.now().toLocalDateTime(kotlinx.datetime.TimeZone.currentSystemDefault()).monthNumber
             ).first(),
             recurringRules = recurringRuleRepository.getAll().first(),
-            tags = tagRepository.getAll().first()
+            wishlistItems = wishlistItemRepository.getAll().first()
         )
     }
 
@@ -301,10 +301,6 @@ class BackupViewModel @Inject constructor(
         paymentMethodRepository.deleteAll()
         backup.paymentMethods.forEach { paymentMethodRepository.insert(it) }
 
-        // Tags
-        tagRepository.deleteAll()
-        backup.tags.forEach { tagRepository.insert(it) }
-
         // Budgets
         budgetRepository.deleteAll()
         backup.budgets.forEach { budgetRepository.insert(it) }
@@ -312,6 +308,10 @@ class BackupViewModel @Inject constructor(
         // Recurring rules
         recurringRuleRepository.deleteAll()
         backup.recurringRules.forEach { recurringRuleRepository.insert(it) }
+
+        // Wishlist items
+        wishlistItemRepository.deleteAll()
+        backup.wishlistItems.forEach { wishlistItemRepository.insert(it) }
     }
 
     fun generatePdf(

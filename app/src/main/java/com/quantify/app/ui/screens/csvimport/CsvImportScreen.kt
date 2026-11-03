@@ -21,6 +21,8 @@ import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.quantify.app.data.local.entity.CategoryEntity
@@ -89,7 +91,10 @@ fun CsvImportScreen(
             )
         }
         CsvImportStatus.DONE -> {
-            CsvImportDoneScreen(saved = state.savedCount, onDone = { onClose() })
+            CsvImportDoneScreen(saved = state.savedCount, onDone = {
+                viewModel.reset()
+                onClose()
+            })
         }
         CsvImportStatus.ERROR -> {
             CsvImportErrorScreen(
@@ -447,6 +452,17 @@ fun CsvClassifyScreen(
                                 tint = MaterialTheme.colorScheme.onPrimaryContainer
                             )
                         }
+                    } else {
+                        TextButton(onClick = { showConfirm = true }) {
+                            Text("Save", color = MaterialTheme.colorScheme.primary)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Icon(
+                                Icons.Default.DoneAll,
+                                contentDescription = "Save",
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
                     }
                 }
             }
@@ -471,7 +487,8 @@ fun CsvClassifyScreen(
                         onValueChange = { splitAmountText = it.filter { c -> c.isDigit() } },
                         label = { Text("Amount for this row") },
                         modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                     )
                     val entered = splitAmountText.toDoubleOrNullOrNull()
                     val remainder = row.amount - entered

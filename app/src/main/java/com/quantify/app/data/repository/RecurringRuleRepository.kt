@@ -39,7 +39,6 @@ class RecurringRuleRepository @Inject constructor(
                 paymentMethodId = rule.paymentMethodId,
                 description = rule.description,
                 dateEpochSeconds = Clock.System.now().epochSeconds,
-                tags = rule.tags,
                 recurringRuleId = rule.id
             )
             transactionDao.insert(transaction)

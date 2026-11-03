@@ -38,13 +38,19 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.quantify.app.data.local.entity.BudgetEntity
 import com.quantify.app.ui.backup.BackupViewModel
+import com.quantify.app.ui.screens.budget.AddBudgetScreen
+import com.quantify.app.ui.screens.budget.BudgetScreen
 import com.quantify.app.ui.screens.csvimport.CsvImportScreen
 import com.quantify.app.ui.screens.dashboard.DashboardScreen
 import com.quantify.app.ui.screens.edittransaction.EditTransactionScreen
+import com.quantify.app.ui.screens.manage.CategoriesScreen
 import com.quantify.app.ui.screens.manage.ManageScreen
 import com.quantify.app.ui.screens.stats.StatsScreen
 import com.quantify.app.ui.screens.transactions.TransactionsScreen
+import com.quantify.app.ui.screens.wishlist.AddWishlistScreen
+import com.quantify.app.ui.screens.wishlist.WishlistScreen
 import com.quantify.app.ui.theme.QuantifyTheme
 import com.quantify.app.ui.viewmodel.DashboardViewModel
 import com.quantify.app.ui.viewmodel.TransactionViewModel
@@ -95,10 +101,16 @@ private fun AppContentInner(backupViewModel: BackupViewModel, currentTheme: Stri
     val pagerState = rememberPagerState(pageCount = { items.size })
     val scope = rememberCoroutineScope()
 
-    // Overlay state for secondary routes (add/edit transaction, csv import)
+    // Overlay state for secondary routes (add/edit transaction, csv import, categories, budget, wishlist)
     var showAddTransaction by remember { mutableStateOf(false) }
     var editTransactionId by remember { mutableStateOf<String?>(null) }
     var showCsvImport by remember { mutableStateOf(false) }
+    var showCategories by remember { mutableStateOf(false) }
+    var showBudget by remember { mutableStateOf(false) }
+    var showAddBudget by remember { mutableStateOf(false) }
+    var editingBudget by remember { mutableStateOf<BudgetEntity?>(null) }
+    var showWishlist by remember { mutableStateOf(false) }
+    var showAddWishlist by remember { mutableStateOf(false) }
 
     // Activity-scoped ViewModels — scoped to the Activity so Dashboard + Stats share one instance
     val dashboardViewModel: DashboardViewModel = hiltViewModel(activity)
@@ -141,7 +153,7 @@ private fun AppContentInner(backupViewModel: BackupViewModel, currentTheme: Stri
     }
 
     // Handle back press: close overlays, then navigate to Home, then exit
-    BackHandler(enabled = showAddTransaction || editTransactionId != null || showCsvImport) {
+    BackHandler(enabled = showAddTransaction || editTransactionId != null || showCsvImport || showCategories || showBudget || showAddBudget || showWishlist || showAddWishlist) {
         if (showAddTransaction) {
             showAddTransaction = false
         } else if (editTransactionId != null) {
@@ -149,10 +161,22 @@ private fun AppContentInner(backupViewModel: BackupViewModel, currentTheme: Stri
             transactionViewModel.clearLoadedTransaction()
         } else if (showCsvImport) {
             showCsvImport = false
+        } else if (showCategories) {
+            showCategories = false
+        } else if (showAddBudget) {
+            showAddBudget = false
+            editingBudget = null
+        } else if (showBudget) {
+            showBudget = false
+            editingBudget = null
+        } else if (showAddWishlist) {
+            showAddWishlist = false
+        } else if (showWishlist) {
+            showWishlist = false
         }
     }
 
-    BackHandler(enabled = pagerState.currentPage != 0 && !showAddTransaction && editTransactionId == null && !showCsvImport) {
+    BackHandler(enabled = pagerState.currentPage != 0 && !showAddTransaction && editTransactionId == null && !showCsvImport && !showCategories && !showBudget && !showAddBudget && !showWishlist && !showAddWishlist) {
         scope.launch { pagerState.scrollToPage(0) }
         transactionViewModel.clearFilterCategory()
     }
@@ -171,7 +195,9 @@ private fun AppContentInner(backupViewModel: BackupViewModel, currentTheme: Stri
                                 scope.launch { pagerState.scrollToPage(1) }
                             },
                             onSharePdf = { sharePdf() },
-                            onAddTransaction = { showAddTransaction = true }
+                            onAddTransaction = { showAddTransaction = true },
+                            onNavigateToBudget = { showBudget = true },
+                            onNavigateToWishlist = { showWishlist = true }
                         )
                         1 -> TransactionsScreen(
                             viewModel = transactionViewModel,
@@ -193,7 +219,8 @@ private fun AppContentInner(backupViewModel: BackupViewModel, currentTheme: Stri
                         3 -> ManageScreen(
                             transactionViewModel = transactionViewModel,
                             backupViewModel = backupViewModel,
-                            onCsvImport = { showCsvImport = true }
+                            onCsvImport = { showCsvImport = true },
+                            onCategories = { showCategories = true }
                         )
                     }
                 }
@@ -218,6 +245,34 @@ private fun AppContentInner(backupViewModel: BackupViewModel, currentTheme: Stri
                 if (showCsvImport) {
                     CsvImportScreen(onClose = { showCsvImport = false })
                 }
+                if (showCategories) {
+                    CategoriesScreen(
+                        viewModel = transactionViewModel,
+                        onClose = { showCategories = false }
+                    )
+                }
+                if (showBudget) {
+                    BudgetScreen(
+                        onClose = { showBudget = false; editingBudget = null },
+                        onAddBudget = { editingBudget = null; showAddBudget = true },
+                        onEditBudget = { budget -> editingBudget = budget; showAddBudget = true }
+                    )
+                }
+                if (showAddBudget) {
+                    AddBudgetScreen(
+                        onClose = { showAddBudget = false; editingBudget = null },
+                        editBudget = editingBudget
+                    )
+                }
+                if (showWishlist) {
+                    WishlistScreen(
+                        onClose = { showWishlist = false },
+                        onAddItem = { showAddWishlist = true }
+                    )
+                }
+                if (showAddWishlist) {
+                    AddWishlistScreen(onClose = { showAddWishlist = false })
+                }
             }
 
             // NavigationBar as sibling — always receives touches
@@ -230,6 +285,12 @@ private fun AppContentInner(backupViewModel: BackupViewModel, currentTheme: Stri
                             showAddTransaction = false
                             editTransactionId = null
                             showCsvImport = false
+                            showCategories = false
+                            showBudget = false
+                            showAddBudget = false
+                            editingBudget = null
+                            showWishlist = false
+                            showAddWishlist = false
                             if (index == 1) transactionViewModel.clearFilterCategory()
                             scope.launch { pagerState.scrollToPage(index) }
                         },

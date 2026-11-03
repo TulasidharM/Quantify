@@ -1,10 +1,12 @@
 package com.quantify.app.ui.screens.transactions
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
@@ -25,10 +27,13 @@ import com.quantify.app.data.local.entity.TransactionEntity
 import com.quantify.app.ui.screens.dashboard.TransactionRow
 import com.quantify.app.ui.screens.dashboard.formatCurrency
 import com.quantify.app.ui.viewmodel.TransactionViewModel
+import kotlinx.datetime.Clock
+import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.daysUntil
 import kotlinx.datetime.toLocalDateTime
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun TransactionsScreen(
     onAddTransaction: () -> Unit,
@@ -46,6 +51,7 @@ fun TransactionsScreen(
     var filterType by remember { mutableStateOf<String?>(null) }
     var showDeleteDialog by remember { mutableStateOf<TransactionEntity?>(null) }
     var showCategoryFilter by remember { mutableStateOf(false) }
+    var groupedByDateToggle by remember { mutableStateOf(true) }
 
     val categoryMap = remember(categories) {
         categories.associateBy({ it.id }, { it.name })
@@ -67,7 +73,25 @@ fun TransactionsScreen(
             val matchesType = filterType == null || it.type == filterType
             val matchesCategory = filteredCategoryIds == null || it.categoryId in filteredCategoryIds
             matchesSearch && matchesType && matchesCategory
-        }.sortedByDescending { it.amount }
+        }
+    }
+
+    // Group by date, newest first; within each group sort by amount descending
+    val groupedByDate = remember(filtered) {
+        val tz = TimeZone.currentSystemDefault()
+        val today = Clock.System.now().toLocalDateTime(tz).date
+        filtered
+            .groupBy { txn -> txn.date.toLocalDateTime(tz).date }
+            .toList()
+            .sortedByDescending { (date, _) -> date }
+            .map { (date, txns) ->
+                val label = formatDateLabel(date, today)
+                val sorted = txns.sortedByDescending { it.amount }
+                val net = sorted.fold(0.0) { acc, t ->
+                    if (t.type == "INCOME") acc + t.amount else acc - t.amount
+                }
+                DateGroup(date, label, sorted, net)
+            }
     }
 
     Scaffold(
@@ -223,7 +247,7 @@ fun TransactionsScreen(
                     )
                 }
                 Spacer(modifier = Modifier.height(4.dp))
-                // Category filter row
+                // Category filter row + grouping toggle
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
                         selected = filterCategoryId != null,
@@ -246,6 +270,12 @@ fun TransactionsScreen(
                             label = { Text("Clear") }
                         )
                     }
+                    Spacer(modifier = Modifier.weight(1f))
+                    FilterChip(
+                        selected = groupedByDateToggle,
+                        onClick = { groupedByDateToggle = !groupedByDateToggle },
+                        label = { Text("Group by date") }
+                    )
                 }
             }
 
@@ -253,14 +283,50 @@ fun TransactionsScreen(
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text("No transactions found", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
                 }
+            } else if (groupedByDateToggle) {
+                LazyColumn {
+                    for ((groupIndex, group) in groupedByDate.withIndex()) {
+                        stickyHeader {
+                            Surface(
+                                color = MaterialTheme.colorScheme.surfaceContainer,
+                                tonalElevation = 1.dp
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(group.label, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium)
+                                    Text(
+                                        if (group.net >= 0) "+${formatCurrency(group.net)}" else "-${formatCurrency(Math.abs(group.net))}",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = if (group.net >= 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+                        }
+                        items(group.transactions, key = { txn -> txn.id }) { txn ->
+                            TransactionListItem(
+                                transaction = txn,
+                                categoryName = categoryMap[txn.categoryId],
+                                onClick = { onEditTransaction(txn.id) },
+                                onDelete = { showDeleteDialog = txn },
+                                showDate = false
+                            )
+                        }
+                    }
+                }
             } else {
                 LazyColumn {
-                    items(filtered, key = { txn -> txn.id }) { txn ->
+                    items(filtered.sortedByDescending { it.date }.sortedByDescending { it.amount }, key = { txn -> txn.id }) { txn ->
                         TransactionListItem(
                             transaction = txn,
                             categoryName = categoryMap[txn.categoryId],
                             onClick = { onEditTransaction(txn.id) },
-                            onDelete = { showDeleteDialog = txn }
+                            onDelete = { showDeleteDialog = txn },
+                            showDate = true
                         )
                     }
                 }
@@ -359,7 +425,8 @@ fun TransactionListItem(
     transaction: TransactionEntity,
     categoryName: String?,
     onClick: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    showDate: Boolean = false
 ) {
     Row(
         modifier = Modifier
@@ -368,15 +435,17 @@ fun TransactionListItem(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        val dateStr = transaction.date.toLocalDateTime(TimeZone.currentSystemDefault())
         Column(modifier = Modifier.weight(1f)) {
             Text(transaction.description ?: "No description", style = MaterialTheme.typography.bodyMedium)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    "${dateStr.dayOfMonth}/${dateStr.monthNumber}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                )
+                if (showDate) {
+                    val dateStr = transaction.date.toLocalDateTime(TimeZone.currentSystemDefault())
+                    Text(
+                        "${dateStr.dayOfMonth}/${dateStr.monthNumber}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                    )
+                }
                 categoryName?.let { cat ->
                     Text(
                         cat,
@@ -396,4 +465,26 @@ fun TransactionListItem(
         }
     }
     HorizontalDivider()
+}
+
+private data class DateGroup(
+    val date: LocalDate,
+    val label: String,
+    val transactions: List<TransactionEntity>,
+    val net: Double
+)
+
+private val MonthNames = listOf(
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+)
+
+private fun formatDateLabel(date: LocalDate, today: LocalDate): String {
+    val diff = date.daysUntil(today)
+    return when (diff) {
+        0 -> "Today"
+        1 -> "Yesterday"
+        2 -> "2 days ago"
+        else -> "${date.dayOfMonth} ${MonthNames[date.monthNumber - 1]}"
+    }
 }

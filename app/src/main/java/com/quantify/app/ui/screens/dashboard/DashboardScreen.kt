@@ -18,13 +18,17 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoGraph
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.Icons
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.quantify.app.R
 import com.quantify.app.data.local.entity.CategoryEntity
 import com.quantify.app.data.local.entity.TransactionEntity
+import com.quantify.app.data.local.entity.WishlistItemEntity
 import com.quantify.app.ui.theme.categoryColor
 import com.quantify.app.ui.viewmodel.DashboardViewModel
+import com.quantify.app.ui.viewmodel.WishlistViewModel
 import kotlinx.datetime.Clock
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
@@ -36,7 +40,10 @@ fun DashboardScreen(
     onNavigateToCategory: (String) -> Unit,
     onSharePdf: () -> Unit = {},
     onAddTransaction: () -> Unit = {},
-    viewModel: DashboardViewModel = hiltViewModel()
+    onNavigateToBudget: () -> Unit = {},
+    onNavigateToWishlist: () -> Unit = {},
+    viewModel: DashboardViewModel = hiltViewModel(),
+    wishlistViewModel: WishlistViewModel = hiltViewModel()
 ) {
     val recent by viewModel.recentTransactions.collectAsState()
     val income by viewModel.monthlyIncome.collectAsState()
@@ -46,6 +53,11 @@ fun DashboardScreen(
     val selectedYear by viewModel.selectedYearFlow.collectAsState()
     val selectedMonth by viewModel.selectedMonthFlow.collectAsState()
     val savings = income - expense
+
+    val wishlistItems by wishlistViewModel.items.collectAsState()
+    val wishlistTotal by remember(wishlistItems) {
+        derivedStateOf { wishlistItems.sumOf { it.targetAmount } }
+    }
 
     val categoryMap = remember(categories) {
         categories.associateBy({ it.id }, { it.name })
@@ -96,6 +108,58 @@ fun DashboardScreen(
                         }
                     }
                 }
+            }
+
+            // Quick actions: Budget & Wishlist cards
+            item {
+                Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Card(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable(onClick = onNavigateToBudget)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.AutoGraph, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Budget", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text("Set monthly budgets", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    Card(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clickable(onClick = onNavigateToWishlist)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.FavoriteBorder, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Wishlist", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            if (wishlistItems.isEmpty()) {
+                                Text("Track your wants", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            } else {
+                                Text("${wishlistItems.size} items · ${formatCurrency(wishlistTotal)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                if (wishlistTotal > 0) {
+                                    val afterPurchase = savings - wishlistTotal
+                                    Text(
+                                        "After: ${formatCurrency(afterPurchase)} savings",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (afterPurchase >= 0) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(8.dp))
             }
 
             // Category spending

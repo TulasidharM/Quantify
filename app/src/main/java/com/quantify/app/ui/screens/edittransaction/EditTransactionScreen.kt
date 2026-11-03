@@ -3,6 +3,7 @@ package com.quantify.app.ui.screens.edittransaction
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
@@ -15,6 +16,7 @@ import androidx.compose.ui.composed
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.quantify.app.data.local.entity.CategoryEntity
@@ -167,8 +169,9 @@ fun EditTransactionScreen(
             // Amount
             OutlinedTextField(
                 value = amount,
-                onValueChange = { amount = it },
+                onValueChange = { amount = it.filter { c -> c.isDigit() || c == '.' } },
                 label = { Text("Amount") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                 singleLine = true
             )

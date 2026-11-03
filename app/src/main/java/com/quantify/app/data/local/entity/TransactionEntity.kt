@@ -18,7 +18,6 @@ data class TransactionEntity(
     val description: String?,
     val dateEpochSeconds: Long,
     val createdAtEpochSeconds: Long = Clock.System.now().epochSeconds,
-    val tags: String = "", // comma-separated tag IDs
     val recurringRuleId: String? = null
 ) {
     val date: Instant

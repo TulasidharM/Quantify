@@ -254,7 +254,7 @@ fun PieChart(
     val colors = data.mapIndexed { i, _ -> categoryColor(i) }
     val slices = buildSlicesWithColors(data, total, colors)
     val hasLabels = slices.any { it.sweepAngle > 10f }
-    val pieRadiusFraction = 0.44f  // 44% of half-width
+    val pieRadiusFraction = 0.72f  // 72% of half-width
 
     // Estimate chart height: pie diameter + label column height on each side
     val labelCountLeft = slices.count { it.sweepAngle >= 10f && kotlin.math.cos((it.startAngle + it.sweepAngle / 2f) * kotlin.math.PI / 180.0).toFloat() < 0 }

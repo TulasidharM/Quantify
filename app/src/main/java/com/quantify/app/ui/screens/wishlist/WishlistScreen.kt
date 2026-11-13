@@ -13,6 +13,7 @@ import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -29,6 +30,7 @@ fun WishlistScreen(
     onClose: () -> Unit,
     onAddItem: () -> Unit = {},
     monthlyBudgetedTotal: Double = 0.0,
+    monthlyIncome: Double = 0.0,
     selectedYear: Int = 0,
     selectedMonth: Int = 0,
     viewModel: WishlistViewModel = hiltViewModel()
@@ -37,6 +39,7 @@ fun WishlistScreen(
     var selectedItemIds by remember(items) { mutableStateOf(items.map { it.id }.toSet()) }
     val selectedWishlistTotal = items.filter { it.id in selectedItemIds }.sumOf { it.targetAmount }
     val overallTotal = monthlyBudgetedTotal + selectedWishlistTotal
+    val estimatedSavingThisMonth = monthlyIncome - overallTotal
     val periodLabel = if (selectedYear > 0 && selectedMonth in 1..12) {
         "${Month.values()[selectedMonth - 1].name.lowercase().replaceFirstChar { it.uppercase() }} $selectedYear"
     } else "This month"
@@ -79,6 +82,7 @@ fun WishlistScreen(
                     monthlyBudgetedTotal = monthlyBudgetedTotal,
                     selectedWishlistTotal = selectedWishlistTotal,
                     overallTotal = overallTotal,
+                    estimatedSavingThisMonth = estimatedSavingThisMonth,
                     selectedCount = selectedItemIds.size
                 )
             }
@@ -138,6 +142,7 @@ private fun WishlistSummary(
     monthlyBudgetedTotal: Double,
     selectedWishlistTotal: Double,
     overallTotal: Double,
+    estimatedSavingThisMonth: Double,
     selectedCount: Int
 ) {
     Card(
@@ -159,12 +164,24 @@ private fun WishlistSummary(
             HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp),
                 color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.2f))
             WishlistSummaryRow(label = "Overall total", amount = formatCurrency(overallTotal))
+            Spacer(Modifier.height(10.dp))
+            WishlistSummaryRow(
+                label = "Estimated saving this month",
+                amount = formatCurrency(estimatedSavingThisMonth),
+                amountColor = if (estimatedSavingThisMonth < 0) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onPrimaryContainer
+            )
         }
     }
 }
 
 @Composable
-private fun WishlistSummaryRow(label: String, amount: String, detail: String? = null) {
+private fun WishlistSummaryRow(
+    label: String,
+    amount: String,
+    detail: String? = null,
+    amountColor: Color? = null
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -180,7 +197,8 @@ private fun WishlistSummaryRow(label: String, amount: String, detail: String? = 
         }
         Spacer(Modifier.width(12.dp))
         Text(amount, style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+            fontWeight = FontWeight.SemiBold,
+            color = amountColor ?: MaterialTheme.colorScheme.onPrimaryContainer)
     }
 }
 

@@ -15,9 +15,6 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.quantify.app.data.local.entity.BudgetEntity
 import com.quantify.app.ui.viewmodel.BudgetViewModel
-import kotlinx.datetime.Clock
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.toLocalDateTime
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -47,9 +44,6 @@ fun AddBudgetScreen(
     }
 
     val subCategories = categories.filter { it.parentId == selectedParentId }
-
-    val currentYear = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).year
-    val currentMonth = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).monthNumber
 
     val (parentBudgetAmount, siblingSubBudgetTotal) =
         if (selectedParentId.isNotBlank()) viewModel.getParentBudgetInfo(selectedParentId) else Pair(0.0, 0.0)
@@ -84,8 +78,8 @@ fun AddBudgetScreen(
                                     id = selectedCategoryId,
                                     categoryId = selectedCategoryId,
                                     amount = inputAmount,
-                                    year = currentYear,
-                                    month = currentMonth
+                                    year = 0,
+                                    month = 0
                                 ))
                                 onClose()
                             }

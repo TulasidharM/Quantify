@@ -2,6 +2,8 @@ package com.quantify.app
 
 import android.content.Intent
 import android.os.Bundle
+import android.view.WindowManager
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
@@ -27,7 +29,10 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,11 +52,13 @@ import com.quantify.app.ui.screens.dashboard.DashboardScreen
 import com.quantify.app.ui.screens.edittransaction.EditTransactionScreen
 import com.quantify.app.ui.screens.manage.CategoriesScreen
 import com.quantify.app.ui.screens.manage.ManageScreen
+import com.quantify.app.ui.screens.manage.LocalWebViewModel
 import com.quantify.app.ui.screens.stats.StatsScreen
 import com.quantify.app.ui.screens.transactions.TransactionsScreen
 import com.quantify.app.ui.screens.wishlist.AddWishlistScreen
 import com.quantify.app.ui.screens.wishlist.WishlistScreen
 import com.quantify.app.ui.theme.QuantifyTheme
+import com.quantify.app.ui.theme.LocalCurrencyCode
 import com.quantify.app.ui.viewmodel.DashboardViewModel
 import com.quantify.app.ui.viewmodel.TransactionViewModel
 import dagger.hilt.android.AndroidEntryPoint
@@ -81,15 +88,29 @@ private fun AppContent() {
     // Theme selection — read from BackupViewModel so it persists across process death
     val backupViewModel: BackupViewModel = hiltViewModel(activity)
     val currentTheme by backupViewModel.themeKey.collectAsState()
+    val currentCurrency by backupViewModel.currency.collectAsState()
 
     QuantifyTheme(themeKey = currentTheme) {
-        AppContentInner(backupViewModel = backupViewModel, currentTheme = currentTheme)
+        CompositionLocalProvider(LocalCurrencyCode provides currentCurrency) {
+            AppContentInner(backupViewModel = backupViewModel, currentTheme = currentTheme)
+        }
     }
 }
 
 @Composable
 private fun AppContentInner(backupViewModel: BackupViewModel, currentTheme: String) {
     val activity = LocalContext.current as ComponentActivity
+    val localWebViewModel: LocalWebViewModel = hiltViewModel(activity)
+    val localWebState by localWebViewModel.state.collectAsState()
+    LaunchedEffect(localWebViewModel) { localWebViewModel.start() }
+    DisposableEffect(activity.window, localWebState.url) {
+        if (localWebState.url != null) {
+            activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        onDispose { activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
+    }
 
     val items = listOf(
         BottomNavItem("Home", Icons.Outlined.Home, Icons.Default.Home),
@@ -112,11 +133,13 @@ private fun AppContentInner(backupViewModel: BackupViewModel, currentTheme: Stri
     var budgetParentCategoryId by remember { mutableStateOf<String?>(null) }
     var showWishlist by remember { mutableStateOf(false) }
     var showAddWishlist by remember { mutableStateOf(false) }
+    var showUnbudgetedTransactions by remember { mutableStateOf(false) }
 
     // Activity-scoped ViewModels — scoped to the Activity so Dashboard + Stats share one instance
     val dashboardViewModel: DashboardViewModel = hiltViewModel(activity)
     val transactionViewModel: TransactionViewModel = hiltViewModel(activity)
     val dashboardBudgetedTotal by dashboardViewModel.monthlyBudgetedTotal.collectAsState()
+    val dashboardIncome by dashboardViewModel.monthlyIncome.collectAsState()
     val dashboardYear by dashboardViewModel.selectedYearFlow.collectAsState()
     val dashboardMonth by dashboardViewModel.selectedMonthFlow.collectAsState()
 
@@ -135,24 +158,29 @@ private fun AppContentInner(backupViewModel: BackupViewModel, currentTheme: Stri
         val year = transactionViewModel.selectedYear
         val month = transactionViewModel.selectedMonth
         backupViewModel.generatePdf(
-            transactions = transactionViewModel.transactionsByMonth.value,
-            categories = transactionViewModel.categories.value,
             year = year,
             month = month,
             currency = backupViewModel.currency.value,
-            file = file
-        )
-        val uri = FileProvider.getUriForFile(
-            activity, "${activity.packageName}.fileprovider", file
-        )
-        val shareIntent = Intent(Intent.ACTION_SEND).apply {
-            type = "application/pdf"
-            putExtra(Intent.EXTRA_STREAM, uri)
-            putExtra(Intent.EXTRA_SUBJECT, "Quantify - $monthName $year")
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        activity.startActivity(
-            Intent.createChooser(shareIntent, "Share PDF").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            file = file,
+            onComplete = { result ->
+                result.onSuccess { generatedFile ->
+                    val uri = FileProvider.getUriForFile(
+                        activity, "${activity.packageName}.fileprovider", generatedFile
+                    )
+                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                        type = "application/pdf"
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        putExtra(Intent.EXTRA_SUBJECT, "Quantify - $monthName $year")
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    activity.startActivity(
+                        Intent.createChooser(shareIntent, "Share PDF")
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                }.onFailure {
+                    Toast.makeText(activity, "Could not create PDF report", Toast.LENGTH_LONG).show()
+                }
+            }
         )
     }
 
@@ -201,6 +229,11 @@ private fun AppContentInner(backupViewModel: BackupViewModel, currentTheme: Stri
                             onSharePdf = { sharePdf() },
                             onAddTransaction = { showAddTransaction = true },
                             onNavigateToBudget = { showBudget = true },
+                            onNavigateToUnbudgetedTransactions = {
+                                showUnbudgetedTransactions = true
+                                transactionViewModel.clearFilterCategory()
+                                scope.launch { pagerState.scrollToPage(1) }
+                            },
                             onNavigateToWishlist = { showWishlist = true }
                         )
                         1 -> TransactionsScreen(
@@ -217,7 +250,9 @@ private fun AppContentInner(backupViewModel: BackupViewModel, currentTheme: Stri
                                 transactionViewModel.clearFilterCategory()
                                 scope.launch { pagerState.scrollToPage(0) }
                             },
-                            onSharePdf = { sharePdf() }
+                            onSharePdf = { sharePdf() },
+                            showUnbudgetedOnly = showUnbudgetedTransactions,
+                            onUnbudgetedOnlyChange = { showUnbudgetedTransactions = it }
                         )
                         2 -> StatsScreen(viewModel = dashboardViewModel)
                         3 -> ManageScreen(
@@ -258,6 +293,8 @@ private fun AppContentInner(backupViewModel: BackupViewModel, currentTheme: Stri
                 if (showBudget) {
                     BudgetScreen(
                         onClose = { showBudget = false; editingBudget = null },
+                        selectedYear = dashboardYear,
+                        selectedMonth = dashboardMonth,
                         onAddBudget = { editingBudget = null; budgetParentCategoryId = null; showAddBudget = true },
                         onAddSubcategoryBudget = { categoryId ->
                             editingBudget = null
@@ -279,6 +316,7 @@ private fun AppContentInner(backupViewModel: BackupViewModel, currentTheme: Stri
                         onClose = { showWishlist = false },
                         onAddItem = { showAddWishlist = true },
                         monthlyBudgetedTotal = dashboardBudgetedTotal,
+                        monthlyIncome = dashboardIncome,
                         selectedYear = dashboardYear,
                         selectedMonth = dashboardMonth
                     )

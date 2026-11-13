@@ -24,6 +24,6 @@ interface CategoryDao {
     @Query("SELECT * FROM categories WHERE parentId = :parentId")
     suspend fun getByParentId(parentId: String): List<CategoryEntity>
 
-    @Query("SELECT * FROM categories WHERE type = :type AND isDefault = 1 AND parentId IS NULL LIMIT 1")
+    @Query("SELECT * FROM categories WHERE type = :type AND isDefault = 1 AND parentId IS NULL ORDER BY CASE WHEN name = 'Other' OR name = 'Other Income' THEN 0 ELSE 1 END LIMIT 1")
     suspend fun getByTypeAndIsDefault(type: String): CategoryEntity?
 }

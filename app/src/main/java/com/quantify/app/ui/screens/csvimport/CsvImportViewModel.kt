@@ -27,6 +27,8 @@ import kotlinx.coroutines.launch
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.datetime.Clock
+import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -37,7 +39,8 @@ data class RowClassification(
     val categoryId: String? = null,
     val paymentMethodId: String? = null,
     val label: String = "",
-    val ignored: Boolean = false
+    val ignored: Boolean = false,
+    val duplicateReviewed: Boolean = false
 )
 
 @HiltViewModel
@@ -133,7 +136,8 @@ class CsvImportViewModel @Inject constructor(
                 val defaultPmId = paymentMethodRepository.getDefault()?.id
                 Triple(cats, paymentMethods, defaultPmId)
             }
-            _state.update { it.copy(categories = cats, paymentMethods = paymentMethods, defaultPaymentMethodId = defaultPmId) }
+            val existingTransactions = withContext(Dispatchers.IO) { transactionRepository.getAll().first() }
+            _state.update { it.copy(categories = cats, paymentMethods = paymentMethods, defaultPaymentMethodId = defaultPmId, existingTransactions = existingTransactions) }
         }
     }
 
@@ -163,6 +167,7 @@ class CsvImportViewModel @Inject constructor(
                 }
                 return@launch
             }
+            val existingTransactions = withContext(Dispatchers.IO) { transactionRepository.getAll().first() }
             val classifications = rows.map {
                 RowClassification(paymentMethodId = _state.value.defaultPaymentMethodId)
             }
@@ -170,6 +175,7 @@ class CsvImportViewModel @Inject constructor(
                 it.copy(
                     parsedRows = rows,
                     classifications = classifications.toMutableList(),
+                    existingTransactions = existingTransactions,
                     currentRow = 0,
                     status = CsvImportStatus.CLASSIFYING
                 )
@@ -207,6 +213,17 @@ class CsvImportViewModel @Inject constructor(
         _state.update {
             val cl = it.classifications[index]
             it.copy(classifications = it.classifications.toMutableList().apply { this[index] = cl.copy(ignored = ignored) })
+        }
+        saveSession()
+    }
+
+    fun decidePossibleDuplicate(index: Int, addAnyway: Boolean) {
+        _state.update {
+            val classification = it.classifications[index]
+            val nextRow = if (!addAnyway && index < it.parsedRows.lastIndex) index + 1 else it.currentRow
+            it.copy(classifications = it.classifications.toMutableList().apply {
+                this[index] = classification.copy(ignored = !addAnyway, duplicateReviewed = true)
+            }, currentRow = nextRow, duplicateReviewRequired = false)
         }
         saveSession()
     }
@@ -276,6 +293,16 @@ class CsvImportViewModel @Inject constructor(
             try {
                 val rows = _state.value.parsedRows
                 val classifications = _state.value.classifications
+                val existingTransactions = withContext(Dispatchers.IO) { transactionRepository.getAll().first() }
+                _state.update { it.copy(existingTransactions = existingTransactions) }
+                val unresolvedDuplicate = rows.indices.firstOrNull { index ->
+                    hasPossibleDuplicate(rows[index], existingTransactions) &&
+                        !classifications[index].duplicateReviewed
+                }
+                if (unresolvedDuplicate != null) {
+                    _state.update { it.copy(currentRow = unresolvedDuplicate, duplicateReviewRequired = true) }
+                    return@launch
+                }
                 var saved = 0
                 Log.d("CsvImport", "Starting save: ${rows.size} rows, ${classifications.size} classifications")
 
@@ -312,6 +339,9 @@ class CsvImportViewModel @Inject constructor(
                 }
 
                 Log.d("CsvImport", "All inserted, saved=$saved")
+                dataStore.edit { prefs ->
+                    prefs[CsvImportPreferences.lastPhonePeImportEpoch] = Clock.System.now().epochSeconds
+                }
                 _state.update { it.copy(status = CsvImportStatus.DONE, savedCount = saved) }
                 clearSession()
                 onComplete()
@@ -340,9 +370,11 @@ class CsvImportViewModel @Inject constructor(
                 it.copy(
                     parsedRows = emptyList(),
                     classifications = mutableListOf(),
+                    existingTransactions = emptyList(),
                     currentRow = 0,
                     status = CsvImportStatus.IDLE,
                     savedCount = 0,
+                    duplicateReviewRequired = false,
                     errorMessage = null,
                     categories = cats,
                     paymentMethods = paymentMethods,
@@ -355,6 +387,7 @@ class CsvImportViewModel @Inject constructor(
 
 data class CsvImportState(
     val parsedRows: List<ParsedCsvRow> = emptyList(),
+    val existingTransactions: List<TransactionEntity> = emptyList(),
     val classifications: MutableList<RowClassification> = mutableListOf(),
     val currentRow: Int = 0,
     val categories: List<CategoryEntity> = emptyList(),
@@ -362,8 +395,24 @@ data class CsvImportState(
     val defaultPaymentMethodId: String? = null,
     val status: CsvImportStatus = CsvImportStatus.IDLE,
     val savedCount: Int = 0,
+    val duplicateReviewRequired: Boolean = false,
     val errorMessage: String? = null
 )
+
+fun findPossibleDuplicates(row: ParsedCsvRow, existingTransactions: List<TransactionEntity>): List<TransactionEntity> {
+    val expectedType = if (row.direction == Direction.PAID) "EXPENSE" else "INCOME"
+    val importedWholeRupees = row.amount.toLong()
+    return existingTransactions.filter { transaction ->
+        val transactionDate = kotlinx.datetime.Instant.fromEpochSeconds(transaction.dateEpochSeconds)
+            .toLocalDateTime(kotlinx.datetime.TimeZone.currentSystemDefault()).date
+        transaction.type == expectedType &&
+            transactionDate == row.date &&
+            kotlin.math.abs(transaction.amount.toLong() - importedWholeRupees) <= 1L
+    }
+}
+
+private fun hasPossibleDuplicate(row: ParsedCsvRow, existingTransactions: List<TransactionEntity>) =
+    findPossibleDuplicates(row, existingTransactions).isNotEmpty()
 
 enum class CsvImportStatus {
     IDLE, CLASSIFYING, DONE, ERROR

@@ -37,18 +37,23 @@ import kotlinx.datetime.toLocalDateTime
 @Composable
 fun BudgetScreen(
     onClose: () -> Unit = {},
+    selectedYear: Int = 0,
+    selectedMonth: Int = 0,
     onAddBudget: () -> Unit = {},
     onAddSubcategoryBudget: (String) -> Unit = {},
     onEditBudget: (BudgetEntity) -> Unit = {},
     viewModel: BudgetViewModel = hiltViewModel()
 ) {
-    val budgets by viewModel.budgets.collectAsState()
+    val currentPeriod = remember {
+        Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
+    }
+    val periodYear = selectedYear.takeIf { it > 0 } ?: currentPeriod.year
+    val periodMonth = selectedMonth.takeIf { it in 1..12 } ?: currentPeriod.monthNumber
+    val budgetsFlow = remember(viewModel, periodYear, periodMonth) {
+        viewModel.budgetsForPeriod(periodYear, periodMonth)
+    }
+    val budgets by budgetsFlow.collectAsState(initial = emptyList())
     val categories by viewModel.categories.collectAsState()
-
-    val currentDate = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
-    val currentYear = currentDate.year
-    val monthLabel = currentDate.month.name.lowercase()
-        .replaceFirstChar { it.uppercase() }
 
     val topLevelCategories = categories.filter { it.parentId == null }
 
@@ -94,7 +99,7 @@ fun BudgetScreen(
                     }
                 },
                 actions = {
-                    Text("$monthLabel $currentYear", style = MaterialTheme.typography.labelLarge,
+                    Text("Applies every month", style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(end = 16.dp))
                 }

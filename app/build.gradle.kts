@@ -78,9 +78,6 @@ dependencies {
     ksp(libs.hilt.compiler)
     implementation(libs.hilt.navigation.compose)
 
-    // WorkManager
-    implementation(libs.androidx.work.runtime)
-
     // DataStore
     implementation(libs.androidx.datastore.preferences)
 

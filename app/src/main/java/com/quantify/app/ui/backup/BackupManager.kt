@@ -13,8 +13,7 @@ class BackupManager(
     private val transactionRepository: TransactionRepository,
     private val categoryRepository: CategoryRepository,
     private val paymentMethodRepository: PaymentMethodRepository,
-    private val budgetRepository: BudgetRepository,
-    private val recurringRuleRepository: RecurringRuleRepository
+    private val budgetRepository: BudgetRepository
 ) {
     suspend fun createBackupStream(): OutputStream {
         return withContext(Dispatchers.IO) {
@@ -39,12 +38,4 @@ class BackupManager(
         return intent
     }
 
-    fun exportCsvIntent(): Intent {
-        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
-            addCategory(Intent.CATEGORY_OPENABLE)
-            type = "text/csv"
-            putExtra(Intent.EXTRA_TITLE, "quantify_transactions.csv")
-        }
-        return intent
-    }
 }

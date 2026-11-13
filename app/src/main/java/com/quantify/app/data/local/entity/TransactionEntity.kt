@@ -17,8 +17,7 @@ data class TransactionEntity(
     val paymentMethodId: String?,
     val description: String?,
     val dateEpochSeconds: Long,
-    val createdAtEpochSeconds: Long = Clock.System.now().epochSeconds,
-    val recurringRuleId: String? = null
+    val createdAtEpochSeconds: Long = Clock.System.now().epochSeconds
 ) {
     val date: Instant
         get() = Instant.fromEpochSeconds(dateEpochSeconds)

@@ -84,14 +84,58 @@ class DashboardViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
 
     val monthlyBudgetedTotal: StateFlow<Double> = combine(
-        selectedYearFlow, selectedMonthFlow, allCategories
-    ) { year, month, categories -> Triple(year, month, categories) }
-        .flatMapLatest { (year, month, categories) ->
-            budgetRepository.getByMonth(year, month).map { budgets ->
+        allCategories, budgetRepository.getAll()
+    ) { categories, budgets ->
                 val budgetByCategory = budgets.associateBy { it.categoryId }
                 budgets.sumOf { budget ->
                     val parentId = categories.firstOrNull { it.id == budget.categoryId }?.parentId
                     if (parentId == null || parentId !in budgetByCategory) budget.amount else 0.0
+                }
+    }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+
+    val monthlyBudgetSpentTotal: StateFlow<Double> = combine(
+        selectedYearFlow, selectedMonthFlow, allCategories
+    ) { year, month, categories -> Triple(year, month, categories) }
+        .flatMapLatest { (year, month, categories) ->
+            budgetRepository.getBudgetsWithSpending(year, month).map { budgets ->
+                val budgetByCategory = budgets.associateBy { it.budget.categoryId }
+                budgets.sumOf { budget ->
+                    val parentId = categories.firstOrNull { it.id == budget.budget.categoryId }?.parentId
+                    if (parentId == null || parentId !in budgetByCategory) budget.spent else 0.0
+                }
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+
+    val monthlyInvestmentBudgetSpentTotal: StateFlow<Double> = combine(
+        selectedYearFlow, selectedMonthFlow, allCategories
+    ) { year, month, categories -> Triple(year, month, categories) }
+        .flatMapLatest { (year, month, categories) ->
+            budgetRepository.getBudgetsWithSpending(year, month).map { budgets ->
+                val investmentRoot = categories.firstOrNull {
+                    it.parentId == null && it.type == "EXPENSE" && it.name.equals("Investment", ignoreCase = true)
+                }
+                if (investmentRoot == null) {
+                    0.0
+                } else {
+                    val investmentCategoryIds = mutableSetOf(investmentRoot.id)
+                    var addedCategory: Boolean
+                    do {
+                        val previousSize = investmentCategoryIds.size
+                        categories.filter { it.parentId in investmentCategoryIds }
+                            .forEach { investmentCategoryIds.add(it.id) }
+                        addedCategory = investmentCategoryIds.size > previousSize
+                    } while (addedCategory)
+
+                    val budgetByCategory = budgets.associateBy { it.budget.categoryId }
+                    budgets.sumOf { budget ->
+                        val category = categories.firstOrNull { it.id == budget.budget.categoryId }
+                        val parentId = category?.parentId
+                        if (budget.budget.categoryId in investmentCategoryIds &&
+                            (parentId == null || parentId !in budgetByCategory)
+                        ) budget.spent else 0.0
+                    }
                 }
             }
         }
@@ -146,6 +190,10 @@ class DashboardViewModel @Inject constructor(
 
     val parentCategorySpending: StateFlow<List<ParentCategorySpending>> = monthSummary.map { it.parentCategorySpending }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val investmentSpending: StateFlow<Double> = parentCategorySpending.map { categories ->
+        categories.firstOrNull { it.parentCategory.name.equals("Investment", ignoreCase = true) }?.amount ?: 0.0
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
 
     fun subcategorySpendingFor(parentId: String) = combine(
         monthSummary,

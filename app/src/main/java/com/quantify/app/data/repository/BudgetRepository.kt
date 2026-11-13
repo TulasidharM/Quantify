@@ -20,11 +20,10 @@ class BudgetRepository @Inject constructor(
     private val transactionDao: TransactionDao,
     private val categoryRepository: CategoryRepository
 ) {
-    fun getByMonth(year: Int, month: Int): Flow<List<BudgetEntity>> =
-        budgetDao.getByMonth(year, month)
+    fun getAll(): Flow<List<BudgetEntity>> = budgetDao.getAll()
 
-    suspend fun getByCategory(year: Int, month: Int, categoryId: String) =
-        budgetDao.getByCategory(year, month, categoryId)
+    suspend fun getByCategory(categoryId: String) =
+        budgetDao.getByCategory(categoryId)
 
     suspend fun insert(budget: BudgetEntity) = budgetDao.insert(budget)
     suspend fun delete(budget: BudgetEntity) = budgetDao.delete(budget)
@@ -38,7 +37,7 @@ class BudgetRepository @Inject constructor(
         val descendants = collectAllDescendants(budget.categoryId, childrenOf)
         budgetDao.delete(budget)
         for (subId in descendants) {
-            val subBudget = budgetDao.getByCategory(budget.year, budget.month, subId)
+            val subBudget = budgetDao.getByCategory(subId)
             if (subBudget != null) budgetDao.delete(subBudget)
         }
     }
@@ -51,7 +50,7 @@ class BudgetRepository @Inject constructor(
     )
 
     fun getBudgetsWithSpending(year: Int, month: Int): Flow<List<BudgetWithSpending>> {
-        val budgets = budgetDao.getByMonth(year, month)
+        val budgets = budgetDao.getAll()
         val range = getMonthRange(year, month)
         val transactions = transactionDao.getByDateRange(range.first.epochSeconds, range.second.epochSeconds)
         val categories = categoryRepository.getAll()
@@ -88,9 +87,12 @@ class BudgetRepository @Inject constructor(
     private fun getMonthRange(year: Int, month: Int): Pair<kotlinx.datetime.Instant, kotlinx.datetime.Instant> {
         val start = LocalDateTime(year, month, 1, 0, 0)
             .toInstant(TimeZone.currentSystemDefault())
-        val end = LocalDateTime(year, month + 1.coerceAtMost(12), 1, 0, 0)
-            .let { if (month == 12) LocalDateTime(year + 1, 1, 1, 0, 0) else it }
-            .toInstant(TimeZone.currentSystemDefault())
+        val endDate = if (month == 12) {
+            LocalDateTime(year + 1, 1, 1, 0, 0)
+        } else {
+            LocalDateTime(year, month + 1, 1, 0, 0)
+        }
+        val end = endDate.toInstant(TimeZone.currentSystemDefault())
         return Pair(start, end)
     }
 }

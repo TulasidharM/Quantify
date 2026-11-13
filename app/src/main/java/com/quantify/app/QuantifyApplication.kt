@@ -2,7 +2,6 @@ package com.quantify.app
 
 import android.app.Application
 import com.quantify.app.data.seed.SeedData
-import com.quantify.app.util.RecurringScheduler
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -20,6 +19,5 @@ class QuantifyApplication : Application() {
         applicationScope.launch {
             seedData.seedIfEmpty()
         }
-        RecurringScheduler.schedule(this)
     }
 }

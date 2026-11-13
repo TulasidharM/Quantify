@@ -22,6 +22,7 @@ class SeedData @Inject constructor(
         Triple("Health", 0xFFFF4444L, "favorite"),
         Triple("Entertainment", 0xFF9C27B0L, "theater_comedy"),
         Triple("Education", 0xFF3F51B5L, "school"),
+        Triple("Investment", 0xFF008577L, "trending_up"),
         Triple("Travel", 0xFF00BCD4L, "flight"),
         Triple("Home", 0xFF795548L, "home"),
         Triple("Salary", 0xFF4CAF50L, "account_balance_wallet"),
@@ -102,7 +103,7 @@ class SeedData @Inject constructor(
                         type = "EXPENSE",
                         color = color,
                         icon = icon,
-                        isDefault = name == "Other"
+                        isDefault = name == "Other" || name == "Investment"
                     ))
                 }
                 // Seed income categories
@@ -145,6 +146,29 @@ class SeedData @Inject constructor(
                         isDefault = index == 0
                     ))
                 }
+            }
+
+            // Ensure the protected Investment expense category exists for databases created by older versions.
+            val allCategories = db.categoryDao().getAll().first()
+            val existingInvestment = allCategories.firstOrNull {
+                it.type == "EXPENSE" && it.parentId == null && it.name.equals("Investment", ignoreCase = true)
+            }
+            if (existingInvestment != null) {
+                if (!existingInvestment.isDefault) {
+                    db.categoryDao().insert(existingInvestment.copy(isDefault = true))
+                }
+            } else {
+                val investmentId = if (allCategories.none { it.id == "investment" }) "investment" else "default_investment"
+                db.categoryDao().insert(
+                    CategoryEntity(
+                        id = investmentId,
+                        name = "Investment",
+                        type = "EXPENSE",
+                        color = 0xFF008577L,
+                        icon = "trending_up",
+                        isDefault = true
+                    )
+                )
             }
         }
     }

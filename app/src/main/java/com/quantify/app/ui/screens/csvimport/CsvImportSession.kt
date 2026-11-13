@@ -31,21 +31,24 @@ data class RowClassificationSnapshot(
     val categoryId: String? = null,
     val paymentMethodId: String? = null,
     val label: String = "",
-    val ignored: Boolean = false
+    val ignored: Boolean = false,
+    val duplicateReviewed: Boolean = false
 )
 
 fun RowClassification.toSnapshot() = RowClassificationSnapshot(
     categoryId = categoryId,
     paymentMethodId = paymentMethodId,
     label = label,
-    ignored = ignored
+    ignored = ignored,
+    duplicateReviewed = duplicateReviewed
 )
 
 fun RowClassificationSnapshot.toClassification() = RowClassification(
     categoryId = categoryId,
     paymentMethodId = paymentMethodId,
     label = label,
-    ignored = ignored
+    ignored = ignored,
+    duplicateReviewed = duplicateReviewed
 )
 
 fun ParsedCsvRow.toSnapshot() = CsvRowSnapshot(

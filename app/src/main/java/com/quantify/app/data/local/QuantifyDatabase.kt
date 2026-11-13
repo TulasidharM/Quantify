@@ -11,10 +11,9 @@ import com.quantify.app.data.local.entity.*
         CategoryEntity::class,
         PaymentMethodEntity::class,
         BudgetEntity::class,
-        RecurringRuleEntity::class,
         WishlistItemEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false,
     autoMigrations = []
 )
@@ -23,6 +22,5 @@ abstract class QuantifyDatabase : RoomDatabase() {
     abstract fun categoryDao(): CategoryDao
     abstract fun paymentMethodDao(): PaymentMethodDao
     abstract fun budgetDao(): BudgetDao
-    abstract fun recurringRuleDao(): RecurringRuleDao
     abstract fun wishlistItemDao(): WishlistItemDao
 }

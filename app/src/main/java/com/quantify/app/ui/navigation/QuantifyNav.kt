@@ -10,7 +10,6 @@ import androidx.navigation.navArgument
 import com.quantify.app.ui.screens.budget.BudgetScreen
 import com.quantify.app.ui.screens.csvimport.CsvImportScreen
 import com.quantify.app.ui.screens.edittransaction.EditTransactionScreen
-import com.quantify.app.ui.screens.recurring.RecurringScreen
 import com.quantify.app.ui.screens.transactions.TransactionsScreen
 import com.quantify.app.ui.viewmodel.TransactionViewModel
 
@@ -22,7 +21,6 @@ sealed class Screen(val route: String) {
     }
     object Stats : Screen("stats")
     object Budgets : Screen("budgets")
-    object Recurring : Screen("recurring")
     object Manage : Screen("manage")
     object CsvImport : Screen("csv_import")
     object AddTransaction : Screen("add_transaction")
@@ -33,7 +31,7 @@ sealed class Screen(val route: String) {
 
 /**
  * Secondary NavHost for non-bottom-tab routes: add/edit transaction, csv import,
- * transactions by category, budgets, recurring.
+ * transactions by category, budgets.
  *
  * The 4 bottom tabs (Dashboard, Transactions, Stats, Manage) are handled by
  * HorizontalPager in MainActivity — they are NOT in this NavHost.
@@ -63,7 +61,6 @@ fun QuantifyNavHost(
             )
         }
         composable(Screen.Budgets.route) { BudgetScreen() }
-        composable(Screen.Recurring.route) { RecurringScreen() }
         composable(Screen.CsvImport.route) { CsvImportScreen(onClose = { navController.popBackStack() }) }
         composable(Screen.AddTransaction.route) {
             EditTransactionScreen(

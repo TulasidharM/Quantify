@@ -27,6 +27,7 @@ import com.quantify.app.data.local.entity.TransactionEntity
 import com.quantify.app.ui.screens.dashboard.TransactionRow
 import com.quantify.app.ui.screens.dashboard.formatCurrency
 import com.quantify.app.ui.viewmodel.TransactionViewModel
+import com.quantify.app.ui.viewmodel.BudgetViewModel
 import kotlinx.datetime.Clock
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
@@ -40,6 +41,8 @@ fun TransactionsScreen(
     onEditTransaction: (String) -> Unit,
     onBack: (() -> Unit)? = null,
     onSharePdf: () -> Unit = {},
+    showUnbudgetedOnly: Boolean = false,
+    onUnbudgetedOnlyChange: (Boolean) -> Unit = {},
     viewModel: TransactionViewModel = hiltViewModel()
 ) {
     val transactions by viewModel.transactionsByMonth.collectAsState()
@@ -47,15 +50,41 @@ fun TransactionsScreen(
     val filterCategoryId by viewModel.filterCategoryIdFlow.collectAsState()
     val selectedYear by viewModel.selectedYearFlow.collectAsState()
     val selectedMonth by viewModel.selectedMonthFlow.collectAsState()
+    val budgetViewModel: BudgetViewModel = hiltViewModel()
+    val budgetedCategoryIds by budgetViewModel.budgetedCategoryIds.collectAsState()
     var searchQuery by remember { mutableStateOf("") }
     var filterType by remember { mutableStateOf<String?>(null) }
     var showDeleteDialog by remember { mutableStateOf<TransactionEntity?>(null) }
     var showCategoryFilter by remember { mutableStateOf(false) }
     var groupedByDateToggle by remember { mutableStateOf(true) }
 
+    LaunchedEffect(showUnbudgetedOnly) {
+        if (showUnbudgetedOnly) filterType = "EXPENSE"
+    }
+
     val categoryMap = remember(categories) {
         categories.associateBy({ it.id }, { it.name })
     }
+    val isBudgetCoveredCategory = remember(categories, budgetedCategoryIds) {
+        { categoryId: String ->
+            var category = categories.firstOrNull { it.id == categoryId }
+            var covered = false
+            while (category != null && !covered) {
+                covered = category.id in budgetedCategoryIds
+                category = category.parentId?.let { parentId -> categories.firstOrNull { it.id == parentId } }
+            }
+            covered
+        }
+    }
+    val filterChipColors = FilterChipDefaults.filterChipColors(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+        labelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        iconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+        selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        selectedLeadingIconColor = MaterialTheme.colorScheme.primary,
+        selectedTrailingIconColor = MaterialTheme.colorScheme.primary
+    )
 
     // When filtering by a parent category, include all its subcategory IDs
     val filteredCategoryIds = remember(categories, filterCategoryId) {
@@ -66,13 +95,15 @@ fun TransactionsScreen(
         }
     }
 
-    val filtered = remember(transactions, searchQuery, filterType, filteredCategoryIds) {
+    val filtered = remember(transactions, searchQuery, filterType, filteredCategoryIds, showUnbudgetedOnly, isBudgetCoveredCategory) {
         transactions.filter {
             val matchesSearch = searchQuery.isEmpty() ||
                 (it.description ?: "").contains(searchQuery, ignoreCase = true)
             val matchesType = filterType == null || it.type == filterType
             val matchesCategory = filteredCategoryIds == null || it.categoryId in filteredCategoryIds
-            matchesSearch && matchesType && matchesCategory
+            val matchesUnbudgeted = !showUnbudgetedOnly ||
+                (it.type == "EXPENSE" && !isBudgetCoveredCategory(it.categoryId))
+            matchesSearch && matchesType && matchesCategory && matchesUnbudgeted
         }
     }
 
@@ -232,19 +263,36 @@ fun TransactionsScreen(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
                         selected = filterType == null,
-                        onClick = { filterType = null },
-                        label = { Text("All") }
+                        onClick = {
+                            filterType = null
+                            onUnbudgetedOnlyChange(false)
+                        },
+                        label = { Text("All") },
+                        colors = filterChipColors
                     )
                     FilterChip(
                         selected = filterType == "EXPENSE",
                         onClick = { filterType = "EXPENSE" },
-                        label = { Text("Expense") }
+                        label = { Text("Expense") },
+                        colors = filterChipColors
                     )
                     FilterChip(
                         selected = filterType == "INCOME",
-                        onClick = { filterType = "INCOME" },
-                        label = { Text("Income") }
+                        onClick = {
+                            filterType = "INCOME"
+                            onUnbudgetedOnlyChange(false)
+                        },
+                        label = { Text("Income") },
+                        colors = filterChipColors
                     )
+                    if (filterType == "EXPENSE") {
+                        FilterChip(
+                            selected = showUnbudgetedOnly,
+                            onClick = { onUnbudgetedOnlyChange(!showUnbudgetedOnly) },
+                            label = { Text("Unbudgeted") },
+                            colors = filterChipColors
+                        )
+                    }
                 }
                 Spacer(modifier = Modifier.height(4.dp))
                 // Category filter row + grouping toggle
@@ -261,20 +309,23 @@ fun TransactionsScreen(
                                 )
                                 Text(if (filterCategoryId != null) categoryMap[filterCategoryId] ?: "Category" else "Category")
                             }
-                        }
+                        },
+                        colors = filterChipColors
                     )
                     if (filterCategoryId != null) {
                         FilterChip(
                             selected = false,
                             onClick = { viewModel.clearFilterCategory() },
-                            label = { Text("Clear") }
+                            label = { Text("Clear") },
+                            colors = filterChipColors
                         )
                     }
                     Spacer(modifier = Modifier.weight(1f))
                     FilterChip(
                         selected = groupedByDateToggle,
                         onClick = { groupedByDateToggle = !groupedByDateToggle },
-                        label = { Text("Group by date") }
+                        label = { Text("Group by date") },
+                        colors = filterChipColors
                     )
                 }
             }
@@ -386,6 +437,7 @@ fun TransactionsScreen(
                                 viewModel.setFilterCategoryId(parent.id)
                             },
                             label = { Text(parent.name) },
+                            colors = filterChipColors,
                             modifier = Modifier.padding(end = 4.dp)
                         )
                     }
@@ -402,6 +454,7 @@ fun TransactionsScreen(
                                 selected = sub.id == filterCategoryId,
                                 onClick = { viewModel.setFilterCategoryId(sub.id) },
                                 label = { Text(sub.name) },
+                                colors = filterChipColors,
                                 modifier = Modifier.padding(end = 4.dp)
                             )
                         }

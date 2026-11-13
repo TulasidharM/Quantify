@@ -16,6 +16,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.quantify.app.data.local.entity.*
 import com.quantify.app.data.repository.*
+import com.quantify.app.ui.screens.csvimport.CsvImportPreferences
+import com.quantify.app.ui.theme.localeForCurrencyCode
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
@@ -45,7 +47,6 @@ data class BackupFile(
     val categories: List<CategoryEntity>,
     val paymentMethods: List<PaymentMethodEntity>,
     val budgets: List<BudgetEntity>,
-    val recurringRules: List<RecurringRuleEntity>,
     val wishlistItems: List<WishlistItemEntity> = emptyList()
 )
 
@@ -56,7 +57,6 @@ class BackupViewModel @Inject constructor(
     private val categoryRepository: CategoryRepository,
     private val paymentMethodRepository: PaymentMethodRepository,
     private val budgetRepository: BudgetRepository,
-    private val recurringRuleRepository: RecurringRuleRepository,
     private val wishlistItemRepository: WishlistItemRepository,
     private val dataStore: DataStore<Preferences>
 ) : ViewModel() {
@@ -65,6 +65,10 @@ class BackupViewModel @Inject constructor(
     val currency = dataStore.data.map { prefs ->
         prefs[stringPreferencesKey("currency")] ?: "USD"
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "USD")
+
+    val lastPhonePeImportEpoch = dataStore.data.map { prefs ->
+        prefs[CsvImportPreferences.lastPhonePeImportEpoch]
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     fun setCurrency(currency: String) {
         viewModelScope.launch {
@@ -139,151 +143,13 @@ class BackupViewModel @Inject constructor(
         }
     }
 
-    fun exportCsv(uri: Uri) {
-        viewModelScope.launch {
-            context.contentResolver.openOutputStream(uri)?.use { output ->
-                OutputStreamWriter(output).use { writer ->
-                    writer.write("Date,Type,Amount,Category,Description\n")
-                    val txns = transactionRepository.getAll().first()
-                    for (txn in txns) {
-                        val date = txn.date.toLocalDateTime(kotlinx.datetime.TimeZone.currentSystemDefault())
-                        writer.write("${date.year}-${date.monthNumber}-${date.dayOfMonth},${txn.type},${txn.amount},${txn.categoryId},${txn.description ?: ""}\n")
-                    }
-                }
-            }
-        }
-    }
-
-    fun exportCategories(uri: Uri) {
-        viewModelScope.launch {
-            context.contentResolver.openOutputStream(uri)?.use { output ->
-                OutputStreamWriter(output).use { writer ->
-                    writer.write("Name,Type,Parent Name,Color,Is Default\n")
-                    val cats = categoryRepository.getAll().first()
-                    for (cat in cats) {
-                        val parentName = cat.parentId?.let { pid ->
-                            cats.find { it.id == pid }?.name ?: ""
-                        } ?: ""
-                        writer.write("${cat.name},${cat.type},${parentName},#${java.lang.Long.toHexString(cat.color).uppercase()},${cat.isDefault}\n")
-                    }
-                }
-            }
-        }
-    }
-
-    fun importCategories(uri: Uri, onResult: (String) -> Unit) {
-        viewModelScope.launch {
-            try {
-                val lines = context.contentResolver.openInputStream(uri)?.use { input ->
-                    InputStreamReader(input).use { reader ->
-                        reader.readLines()
-                    }
-                } ?: return@launch
-                if (lines.isEmpty()) {
-                    onResult("File is empty")
-                    return@launch
-                }
-
-                // Parse header by splitting into columns
-                val headerCols = lines[0].lowercase().split(",")
-                val nameIdx = headerCols.indexOfFirst { it.trim() == "name" }
-                val typeIdx = headerCols.indexOfFirst { it.trim() == "type" }
-                val parentIdx = headerCols.indexOfFirst { it.trim().contains("parent") }
-                val colorIdx = headerCols.indexOfFirst { it.trim() == "color" }
-                val defaultIdx = headerCols.indexOfFirst { it.trim().contains("default") }
-                if (nameIdx < 0 || typeIdx < 0) {
-                    onResult("Invalid CSV format (missing Name or Type column)")
-                    return@launch
-                }
-
-                // Collect existing categories to resolve parent names to IDs
-                val existingCats = categoryRepository.getAll().first()
-
-                // Build map: (type, name) -> id  for parent lookup
-                val parentIdByNameAndType = mutableMapOf<Pair<String, String>, String>()
-                for (cat in existingCats) {
-                    if (cat.parentId == null) {
-                        parentIdByNameAndType[Pair(cat.type, cat.name)] = cat.id
-                    }
-                }
-
-                // Track newly inserted parents so we can link subs to them
-                val newParentIds = mutableMapOf<Pair<String, String>, String>()
-                var count = 0
-
-                for (i in 1 until lines.size) {
-                    val cols = lines[i].split(",")
-                    if (cols.size < 2) continue
-
-                    val name = cols.getOrElse(nameIdx) { "" }.trim()
-                    val type = cols.getOrElse(typeIdx) { "" }.trim().uppercase()
-                    val parentName = cols.getOrElse(parentIdx) { "" }.trim()
-                    val colorStr = cols.getOrElse(colorIdx) { "" }.trim()
-                    val isDefaultStr = cols.getOrElse(defaultIdx) { "false" }.trim().lowercase()
-
-                    if (name.isEmpty() || type !in listOf("EXPENSE", "INCOME")) continue
-
-                    // Parse color
-                    var color = 0xFF000000L
-                    try {
-                        color = java.lang.Long.parseUnsignedLong(
-                            colorStr.removePrefix("#"), 16
-                        )
-                    } catch (_: Exception) {}
-
-                    // Resolve parent ID
-                    val parentId = if (parentName.isNotBlank()) {
-                        parentIdByNameAndType[Pair(type, parentName)]
-                            ?: newParentIds[Pair(type, parentName)]
-                            ?: null
-                    } else null
-
-                    // If no parent found and parentName is set, skip subcategory
-                    if (parentName.isNotBlank() && parentId == null) continue
-
-                    val id = if (parentId != null) {
-                        parentId + "_" + name.lowercase().replace(" ", "_")
-                    } else {
-                        name.lowercase().replace(" ", "_")
-                    }
-
-                    val isDefault = isDefaultStr == "true"
-
-                    categoryRepository.insert(CategoryEntity(
-                        id = id,
-                        name = name,
-                        type = type,
-                        color = color,
-                        icon = "",
-                        isDefault = isDefault,
-                        parentId = parentId
-                    ))
-                    count++
-
-                    // Register new parent for subsequent subcategory resolution
-                    if (parentId == null) {
-                        newParentIds[Pair(type, name)] = id
-                    }
-                }
-
-                onResult("Imported $count categories")
-            } catch (e: Exception) {
-                onResult("Error: ${e.message ?: "Unknown error"}")
-            }
-        }
-    }
-
     private suspend fun createBackupFile(): BackupFile = withContext(Dispatchers.IO) {
         BackupFile(
             exportedAt = kotlinx.datetime.Clock.System.now().toEpochMilliseconds(),
             transactions = transactionRepository.getAll().first(),
             categories = categoryRepository.getAll().first(),
             paymentMethods = paymentMethodRepository.getAll().first(),
-            budgets = budgetRepository.getByMonth(
-                kotlinx.datetime.Clock.System.now().toLocalDateTime(kotlinx.datetime.TimeZone.currentSystemDefault()).year,
-                kotlinx.datetime.Clock.System.now().toLocalDateTime(kotlinx.datetime.TimeZone.currentSystemDefault()).monthNumber
-            ).first(),
-            recurringRules = recurringRuleRepository.getAll().first(),
+            budgets = budgetRepository.getAll().first(),
             wishlistItems = wishlistItemRepository.getAll().first()
         )
     }
@@ -305,22 +171,17 @@ class BackupViewModel @Inject constructor(
         budgetRepository.deleteAll()
         backup.budgets.forEach { budgetRepository.insert(it) }
 
-        // Recurring rules
-        recurringRuleRepository.deleteAll()
-        backup.recurringRules.forEach { recurringRuleRepository.insert(it) }
-
         // Wishlist items
         wishlistItemRepository.deleteAll()
         backup.wishlistItems.forEach { wishlistItemRepository.insert(it) }
     }
 
     fun generatePdf(
-        transactions: List<TransactionEntity>,
-        categories: List<CategoryEntity>,
         year: Int,
         month: Int,
         currency: String,
-        file: java.io.File
+        file: java.io.File,
+        onComplete: (Result<java.io.File>) -> Unit
     ) {
         viewModelScope.launch {
             val document = PdfDocument()
@@ -347,8 +208,9 @@ class BackupViewModel @Inject constructor(
             val LIGHT_RED = android.graphics.Color.rgb(253, 237, 238)
             val ROW_ALT = android.graphics.Color.rgb(246, 248, 251)
 
-            val locale = java.util.Locale("en", "IN")
+            val locale = localeForCurrencyCode(currency)
             val currencyFormat = java.text.NumberFormat.getCurrencyInstance(locale).apply {
+                this.currency = java.util.Currency.getInstance(currency)
                 maximumFractionDigits = 0
                 minimumFractionDigits = 0
             }
@@ -357,15 +219,53 @@ class BackupViewModel @Inject constructor(
                 .getDisplayName(java.time.format.TextStyle.FULL, locale)
             val reportPeriod = "$monthName $year"
 
-            val categoryMap = categories.associateBy({ it.id }, { it })
+            // StateFlow can still hold its initial empty value when sharing is tapped
+            // before the month query has emitted. Read the selected month directly so
+            // the report always reflects the database contents.
+            val transactions = transactionRepository.getTransactionsForMonth(year, month)
+
+            val categoryMap = categoryRepository.getAll().first().associateBy({ it.id }, { it })
 
             val totalIncome = transactions.filter { it.type == "INCOME" }.sumOf { it.amount }
             val totalExpenses = transactions.filter { it.type == "EXPENSE" }.sumOf { it.amount }
+            val investmentRoot = categoryMap.values.firstOrNull {
+                it.parentId == null && it.type == "EXPENSE" && it.name.equals("Investment", ignoreCase = true)
+            }
+            val investmentCategoryIds = mutableSetOf<String>()
+            investmentRoot?.let { investmentCategoryIds.add(it.id) }
+            var addedInvestmentCategory: Boolean
+            do {
+                val previousSize = investmentCategoryIds.size
+                categoryMap.values.filter { it.parentId in investmentCategoryIds }
+                    .forEach { investmentCategoryIds.add(it.id) }
+                addedInvestmentCategory = investmentCategoryIds.size > previousSize
+            } while (addedInvestmentCategory)
+            val investmentSpending = transactions
+                .filter { it.type == "EXPENSE" && it.categoryId in investmentCategoryIds }
+                .sumOf { it.amount }
+            val expensesExcludingInvestment = (totalExpenses - investmentSpending).coerceAtLeast(0.0)
             val netBalance = totalIncome - totalExpenses
+
+            val monthlyBudgetRows = budgetRepository.getBudgetsWithSpending(year, month).first()
+            val budgetRowsByCategory = monthlyBudgetRows.associateBy { it.budget.categoryId }
+            val parentBudgetRows = monthlyBudgetRows.filter { row ->
+                categoryMap[row.budget.categoryId]?.parentId == null
+            }
+            val orphanSubcategoryBudgetRows = monthlyBudgetRows.filter { row ->
+                val parentId = categoryMap[row.budget.categoryId]?.parentId
+                parentId != null && parentId !in budgetRowsByCategory
+            }
+            val summaryBudgetRows = (parentBudgetRows + orphanSubcategoryBudgetRows)
+                .sortedByDescending { it.budget.amount }
+            val totalBudgeted = summaryBudgetRows.sumOf { it.budget.amount }
+            val budgetedSpending = summaryBudgetRows.sumOf { it.spent }
+            val unbudgetedSpending = (totalExpenses - budgetedSpending).coerceAtLeast(0.0)
+            val remainingBudget = totalBudgeted - budgetedSpending
 
             val expenseTransactions = transactions.filter { it.type == "EXPENSE" }
             val categoryTotals = expenseTransactions
                 .groupBy { it.categoryId }
+                .filterKeys { it !in investmentCategoryIds }
                 .mapValues { (_, items) -> items.sumOf { it.amount } }
                 .entries.sortedByDescending { it.value }
 
@@ -428,6 +328,23 @@ class BackupViewModel @Inject constructor(
                 canvas.drawRoundRect(RectF(left, top, right, bottom), radius, radius, p)
             }
 
+            fun drawMetricCard(
+                canvas: Canvas,
+                left: Float,
+                top: Float,
+                width: Float,
+                label: String,
+                amount: Double,
+                valueColor: Int = TEXT_PRIMARY
+            ) {
+                drawRoundedRect(canvas, left, top, left + width, top + 62f, 10f, WHITE)
+                drawTextOnCanvas(canvas, label.uppercase(locale), left + 12f, top + 11f,
+                    paint(TEXT_SECONDARY, 8f, true))
+                val amountText = (if (amount < 0) "-" else "") + currencyFormat.format(kotlin.math.abs(amount))
+                drawTextOnCanvas(canvas, amountText, left + 12f, top + 32f,
+                    paint(valueColor, 14f, true))
+            }
+
             fun formatAmount(amount: Double): String {
                 return currencyFormat.format(kotlin.math.abs(amount))
             }
@@ -473,7 +390,7 @@ class BackupViewModel @Inject constructor(
             val availableTableHeight = footerLimit - tableTop - tableHeaderHeight
             val actualRowsPerPage = (availableTableHeight / rowHeight).toInt().coerceAtLeast(1)
             val transactionsPerPage = sortedTransactions.chunked(actualRowsPerPage)
-            val totalPages = 1 + transactionsPerPage.size
+            val totalPages = 2 + transactionsPerPage.size
 
             fun drawCoverPage(canvas: Canvas) {
                 canvas.drawColor(BACKGROUND)
@@ -508,18 +425,23 @@ class BackupViewModel @Inject constructor(
                 val summaryTop = 390f
                 val summaryBottom = 485f
                 val gap = 14f
-                val cardWidth = (CONTENT_WIDTH - gap) / 2f
+                val cardWidth = (CONTENT_WIDTH - gap * 2f) / 3f
 
                 // Income
                 drawRoundedRect(canvas, MARGIN, summaryTop, MARGIN + cardWidth, summaryBottom, 12f, LIGHT_GREEN)
                 drawTextOnCanvas(canvas, "TOTAL INCOME", MARGIN + 15f, summaryTop + 17f, paint(GREEN, 9f, true))
-                drawTextOnCanvas(canvas, formatAmount(totalIncome), MARGIN + 15f, summaryTop + 44f, paint(TEXT_PRIMARY, 16f, true))
+                drawTextOnCanvas(canvas, formatAmount(totalIncome), MARGIN + 15f, summaryTop + 44f, paint(TEXT_PRIMARY, 13f, true))
 
                 // Expenses
                 val expenseLeft = MARGIN + cardWidth + gap
                 drawRoundedRect(canvas, expenseLeft, summaryTop, expenseLeft + cardWidth, summaryBottom, 12f, LIGHT_RED)
                 drawTextOnCanvas(canvas, "TOTAL EXPENSES", expenseLeft + 15f, summaryTop + 17f, paint(RED, 9f, true))
-                drawTextOnCanvas(canvas, formatAmount(totalExpenses), expenseLeft + 15f, summaryTop + 44f, paint(TEXT_PRIMARY, 16f, true))
+                drawTextOnCanvas(canvas, formatAmount(expensesExcludingInvestment), expenseLeft + 15f, summaryTop + 44f, paint(TEXT_PRIMARY, 13f, true))
+
+                val investmentLeft = MARGIN + (cardWidth + gap) * 2f
+                drawRoundedRect(canvas, investmentLeft, summaryTop, investmentLeft + cardWidth, summaryBottom, 12f, LIGHT_GREEN)
+                drawTextOnCanvas(canvas, "INVESTMENT", investmentLeft + 15f, summaryTop + 17f, paint(GREEN, 9f, true))
+                drawTextOnCanvas(canvas, formatAmount(investmentSpending), investmentLeft + 15f, summaryTop + 44f, paint(GREEN, 13f, true))
 
                 // Category Breakdown
                 val sectionTop = 515f
@@ -539,7 +461,7 @@ class BackupViewModel @Inject constructor(
                     for (entry in displayedCategories) {
                         val name = categoryName(entry.key)
                         val amount = entry.value
-                        val percentage = if (totalExpenses > 0) (amount / totalExpenses) * 100.0 else 0.0
+                        val percentage = if (expensesExcludingInvestment > 0) (amount / expensesExcludingInvestment) * 100.0 else 0.0
 
                         drawTextOnCanvas(canvas, name, barStartX, currentY, paint(TEXT_PRIMARY, 10f, true))
                         drawRightText(canvas, String.format(locale, "%.1f", percentage) + "%", barStartX + barWidth, currentY, paint(TEXT_SECONDARY, 9f, true))
@@ -562,6 +484,63 @@ class BackupViewModel @Inject constructor(
                 }
 
                 drawFooter(canvas, 1, totalPages)
+            }
+
+            fun drawBudgetSummaryPage(canvas: Canvas) {
+                canvas.drawColor(BACKGROUND)
+                canvas.drawRect(0f, 0f, PAGE_WIDTH.toFloat(), 130f, paint(NAVY))
+                drawTextOnCanvas(canvas, "QUANTIFY", MARGIN, 38f, paint(WHITE, 11f, true))
+                drawTextOnCanvas(canvas, "Budget summary", MARGIN, 68f, paint(WHITE, 23f, true))
+                drawTextOnCanvas(canvas, "Universal monthly limits · $reportPeriod",
+                    MARGIN, 101f, paint(android.graphics.Color.rgb(190, 202, 222), 10f))
+
+                val metricGap = 12f
+                val metricWidth = (CONTENT_WIDTH - metricGap) / 2f
+                drawMetricCard(canvas, MARGIN, 152f, metricWidth, "Total budgeted", totalBudgeted)
+                drawMetricCard(canvas, MARGIN + metricWidth + metricGap, 152f, metricWidth,
+                    "Budgeted spending", budgetedSpending, GREEN)
+                drawMetricCard(canvas, MARGIN, 226f, metricWidth,
+                    "Unbudgeted spending", unbudgetedSpending, RED)
+                drawMetricCard(canvas, MARGIN + metricWidth + metricGap, 226f, metricWidth,
+                    "Budget remaining", remainingBudget,
+                    if (remainingBudget < 0) RED else GREEN)
+
+                drawTextOnCanvas(canvas, "Budget coverage", MARGIN, 322f, paint(TEXT_PRIMARY, 15f, true))
+                drawTextOnCanvas(canvas, "Category", MARGIN, 350f, paint(TEXT_SECONDARY, 8f, true))
+                drawRightText(canvas, "SPENT / LIMIT", PAGE_WIDTH.toFloat() - MARGIN, 350f,
+                    paint(TEXT_SECONDARY, 8f, true))
+                canvas.drawLine(MARGIN, 365f, PAGE_WIDTH.toFloat() - MARGIN, 365f, paint(BORDER, 1f))
+
+                val displayedBudgets = summaryBudgetRows.take(7)
+                if (displayedBudgets.isEmpty()) {
+                    drawTextOnCanvas(canvas, "No budgets set for this month.", MARGIN, 382f,
+                        paint(TEXT_SECONDARY, 9f))
+                } else {
+                    var rowY = 375f
+                    displayedBudgets.forEach { row ->
+                        val name = categoryName(row.budget.categoryId)
+                        val namePaint = paint(TEXT_PRIMARY, 9f)
+                        var displayName = name
+                        while (displayName.isNotEmpty() && namePaint.measureText(displayName) > CONTENT_WIDTH * 0.54f) {
+                            displayName = displayName.dropLast(1)
+                        }
+                        if (displayName != name) displayName = displayName.trimEnd() + "…"
+                        drawTextOnCanvas(canvas, displayName, MARGIN, rowY, namePaint)
+                        drawRightText(canvas,
+                            "${formatAmount(row.spent)} / ${formatAmount(row.budget.amount)}",
+                            PAGE_WIDTH.toFloat() - MARGIN, rowY, paint(TEXT_PRIMARY, 9f, true))
+                        canvas.drawLine(MARGIN, rowY + 15f, PAGE_WIDTH.toFloat() - MARGIN,
+                            rowY + 15f, paint(BORDER, 0.6f))
+                        rowY += 27f
+                    }
+                    if (summaryBudgetRows.size > displayedBudgets.size) {
+                        drawTextOnCanvas(canvas,
+                            "+ ${summaryBudgetRows.size - displayedBudgets.size} more budget categories",
+                            MARGIN, 570f, paint(TEXT_SECONDARY, 8f))
+                    }
+                }
+
+                drawFooter(canvas, 2, totalPages)
             }
 
             // ---------------------------------------------------------
@@ -664,9 +643,14 @@ class BackupViewModel @Inject constructor(
                 drawCoverPage(coverPage.canvas)
                 document.finishPage(coverPage)
 
+                val planInfo = PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, 2).create()
+                val planPage = document.startPage(planInfo)
+                drawBudgetSummaryPage(planPage.canvas)
+                document.finishPage(planPage)
+
                 // Transaction pages
                 transactionsPerPage.forEachIndexed { index, pageTransactions ->
-                    val pageNumber = index + 2
+                    val pageNumber = index + 3
                     val pageInfo = PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, pageNumber).create()
                     val page = document.startPage(pageInfo)
                     drawTransactionPage(page.canvas, pageNumber, pageTransactions)
@@ -678,6 +662,9 @@ class BackupViewModel @Inject constructor(
                     document.writeTo(output)
                     output.flush()
                 }
+                onComplete(Result.success(file))
+            } catch (error: Exception) {
+                onComplete(Result.failure(error))
             } finally {
                 document.close()
             }

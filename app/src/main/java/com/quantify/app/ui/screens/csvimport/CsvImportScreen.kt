@@ -70,6 +70,9 @@ fun CsvImportScreen(
                 onSetLabel = { label -> viewModel.setLabel(state.currentRow, label) },
                 onSetPaymentMethod = { pmId -> viewModel.setPaymentMethod(state.currentRow, pmId) },
                 onIgnoreAndNext = { viewModel.ignoreAndNext(state.currentRow) },
+                onDecidePossibleDuplicate = { addAnyway ->
+                    viewModel.decidePossibleDuplicate(state.currentRow, addAnyway)
+                },
                 onSplitRow = { amount -> viewModel.splitRow(state.currentRow, amount) },
                 onSaveAll = {
                     viewModel.saveAllTransactions { }
@@ -176,6 +179,7 @@ fun CsvClassifyScreen(
     onSetLabel: (String) -> Unit,
     onSetPaymentMethod: (String?) -> Unit,
     onIgnoreAndNext: () -> Unit,
+    onDecidePossibleDuplicate: (Boolean) -> Unit,
     onSplitRow: (Double) -> Unit,
     onSaveAll: () -> Unit,
     onStartOver: () -> Unit,
@@ -299,6 +303,61 @@ fun CsvClassifyScreen(
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.Medium
                     )
+
+                    val possibleDuplicates = remember(row, state.existingTransactions) {
+                        findPossibleDuplicates(row, state.existingTransactions)
+                    }
+                    if (possibleDuplicates.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.55f)
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    "This might be a redundant transaction",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                                possibleDuplicates.forEach { original ->
+                                    val originalCategory = state.categories
+                                        .firstOrNull { it.id == original.categoryId }?.name
+                                    val originalLabel = original.description?.takeIf { it.isNotBlank() }
+                                        ?: originalCategory ?: "Existing transaction"
+                                    Text(
+                                        "$originalLabel · ₹${String.format("%.2f", original.amount)} · ${row.date.dayOfMonth}/${row.date.monthNumber}/${row.date.year}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onErrorContainer
+                                    )
+                                }
+                                if (state.duplicateReviewRequired && !classification.duplicateReviewed) {
+                                    Text(
+                                        "Choose whether to add or skip this row before saving.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onErrorContainer
+                                    )
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Button(
+                                        onClick = { onDecidePossibleDuplicate(true) },
+                                        enabled = !classification.duplicateReviewed || classification.ignored,
+                                        modifier = Modifier.weight(1f)
+                                    ) { Text(if (classification.duplicateReviewed && !classification.ignored) "Will add" else "Add anyway") }
+                                    OutlinedButton(
+                                        onClick = { onDecidePossibleDuplicate(false) },
+                                        enabled = !classification.duplicateReviewed || !classification.ignored,
+                                        modifier = Modifier.weight(1f)
+                                    ) { Text(if (classification.duplicateReviewed && classification.ignored) "Skipped" else "Skip import") }
+                                }
+                            }
+                        }
+                    }
 
                     // Label field with clear button — keyed by row index so state resets when navigating
                     Spacer(modifier = Modifier.height(16.dp))

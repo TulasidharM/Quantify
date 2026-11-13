@@ -6,6 +6,7 @@ import com.quantify.app.data.local.entity.CategoryEntity
 import com.quantify.app.data.local.entity.PaymentMethodEntity
 import com.quantify.app.data.local.entity.TransactionEntity
 import com.quantify.app.data.repository.CategoryRepository
+import com.quantify.app.data.repository.BudgetRepository
 import com.quantify.app.data.repository.PaymentMethodRepository
 import com.quantify.app.data.repository.TransactionRepository
 import androidx.datastore.core.DataStore
@@ -18,6 +19,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -32,6 +34,7 @@ import javax.inject.Inject
 class TransactionViewModel @Inject constructor(
     private val transactionRepository: TransactionRepository,
     private val categoryRepository: CategoryRepository,
+    private val budgetRepository: BudgetRepository,
     private val paymentMethodRepository: PaymentMethodRepository,
     private val dataStore: DataStore<Preferences>
 ) : ViewModel() {
@@ -152,7 +155,10 @@ class TransactionViewModel @Inject constructor(
 
             // Find a fallback: prefer "Other", then any other category of the same type
             val allCategories = categories.value
-            val otherFallback = allCategories.find { it.type == category.type && it.isDefault && it.parentId == null }
+            val otherFallback = allCategories.firstOrNull {
+                it.type == category.type && it.isDefault && it.parentId == null &&
+                    it.name.equals(if (category.type == "EXPENSE") "Other" else "Other Income", ignoreCase = true)
+            } ?: allCategories.find { it.type == category.type && it.isDefault && it.parentId == null }
             val anyFallback = allCategories.find { it.type == category.type && it.parentId == null && it.id != category.id }
             val fallbackCategory = otherFallback ?: anyFallback
 
@@ -171,6 +177,7 @@ class TransactionViewModel @Inject constructor(
                 // Collect all category IDs and reassign transactions
                 val subCategories = categoryRepository.getByParentId(category.id)
                 val categoryIds = listOf(category.id) + subCategories.map { it.id }
+                deleteBudgetsForCategories(categoryIds.toSet())
                 for (cid in categoryIds) {
                     transactionRepository.updateCategoryId(cid, newFallback.id)
                 }
@@ -185,6 +192,7 @@ class TransactionViewModel @Inject constructor(
             // Collect all category IDs: the category itself + its subcategories
             val subCategories = categoryRepository.getByParentId(category.id)
             val categoryIds = listOf(category.id) + subCategories.map { it.id }
+            deleteBudgetsForCategories(categoryIds.toSet())
 
             // Reassign all transactions to the fallback category
             for (cid in categoryIds) {
@@ -199,6 +207,12 @@ class TransactionViewModel @Inject constructor(
 
             _deleteCategoryMessage.value = "\"${category.name}\" deleted"
         }
+    }
+
+    private suspend fun deleteBudgetsForCategories(categoryIds: Set<String>) {
+        budgetRepository.getAll().first()
+            .filter { it.categoryId in categoryIds }
+            .forEach { budgetRepository.delete(it) }
     }
 
     // Payment Method CRUD

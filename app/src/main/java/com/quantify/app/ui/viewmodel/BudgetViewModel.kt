@@ -28,6 +28,13 @@ class BudgetViewModel @Inject constructor(
     val budgets = budgetRepository.getBudgetsWithSpending(currentYear, currentMonth)
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
+    val budgetedCategoryIds = budgetRepository.getAll()
+        .map { list -> list.map { it.categoryId }.toSet() }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+
+    fun budgetsForPeriod(year: Int, month: Int) =
+        budgetRepository.getBudgetsWithSpending(year, month)
+
     val categories = categoryRepository.getByType("EXPENSE")
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
@@ -36,8 +43,8 @@ class BudgetViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList<CategoryEntity>())
 
     /**
-     * Returns the budget amount for a category (if any exists for current month),
-     * and the sum of all subcategory budget amounts under that parent.
+     * Returns the universal budget amount for a category, and the sum of all
+     * subcategory budget amounts under that parent.
      */
     fun getParentBudgetInfo(parentId: String): Pair<Double, Double> {
         val budgetList = budgets.value

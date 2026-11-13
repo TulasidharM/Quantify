@@ -13,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material.icons.filled.Share
@@ -27,11 +28,14 @@ import com.quantify.app.data.local.entity.CategoryEntity
 import com.quantify.app.data.local.entity.TransactionEntity
 import com.quantify.app.data.local.entity.WishlistItemEntity
 import com.quantify.app.ui.theme.categoryColor
+import com.quantify.app.ui.theme.LocalCurrencyCode
+import com.quantify.app.ui.theme.localeForCurrencyCode
 import com.quantify.app.ui.viewmodel.DashboardViewModel
 import com.quantify.app.ui.viewmodel.WishlistViewModel
 import kotlinx.datetime.Clock
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
+import java.text.NumberFormat
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -41,6 +45,7 @@ fun DashboardScreen(
     onSharePdf: () -> Unit = {},
     onAddTransaction: () -> Unit = {},
     onNavigateToBudget: () -> Unit = {},
+    onNavigateToUnbudgetedTransactions: () -> Unit = {},
     onNavigateToWishlist: () -> Unit = {},
     viewModel: DashboardViewModel = hiltViewModel(),
     wishlistViewModel: WishlistViewModel = hiltViewModel()
@@ -48,16 +53,19 @@ fun DashboardScreen(
     val recent by viewModel.recentTransactions.collectAsState()
     val income by viewModel.monthlyIncome.collectAsState()
     val expense by viewModel.monthlyExpense.collectAsState()
+    val budgetAmount by viewModel.monthlyBudgetedTotal.collectAsState()
+    val budgetUsed by viewModel.monthlyBudgetSpentTotal.collectAsState()
+    val investmentSpending by viewModel.investmentSpending.collectAsState()
+    val investmentBudgetUsed by viewModel.monthlyInvestmentBudgetSpentTotal.collectAsState()
     val parentCategorySpending by viewModel.parentCategorySpending.collectAsState()
     val categories by viewModel.categories.collectAsState()
     val selectedYear by viewModel.selectedYearFlow.collectAsState()
     val selectedMonth by viewModel.selectedMonthFlow.collectAsState()
     val savings = income - expense
-
+    val displayedExpense = (expense - investmentSpending).coerceAtLeast(0.0)
+    val displayedBudgetUsed = (budgetUsed - investmentBudgetUsed).coerceIn(0.0, displayedExpense)
+    val displayedUnbudgeted = (displayedExpense - displayedBudgetUsed).coerceAtLeast(0.0)
     val wishlistItems by wishlistViewModel.items.collectAsState()
-    val wishlistTotal by remember(wishlistItems) {
-        derivedStateOf { wishlistItems.sumOf { it.targetAmount } }
-    }
 
     val categoryMap = remember(categories) {
         categories.associateBy({ it.id }, { it.name })
@@ -88,23 +96,114 @@ fun DashboardScreen(
             LazyColumn {
             // Summary cards
             item {
-                Row(modifier = Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Card(modifier = Modifier.weight(1f)) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Text("Income", style = MaterialTheme.typography.labelMedium)
-                            Text(formatCurrency(income), style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.onSurface)
+                Row(
+                    modifier = Modifier.fillMaxWidth().height(220.dp).padding(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Card(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                            Row(
+                                modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Income", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium)
+                                BoxWithConstraints(Modifier.weight(1f)) {
+                                    val value = formatCurrency(income)
+                                    val size = (maxWidth.value / (value.length.coerceAtLeast(1) * 0.54f)).coerceIn(16f, 24f).sp
+                                    Text(value, modifier = Modifier.fillMaxWidth(),
+                                        style = MaterialTheme.typography.titleLarge.copy(fontSize = size),
+                                        textAlign = TextAlign.End, color = MaterialTheme.colorScheme.onSurface,
+                                        fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                                }
+                            }
+                        }
+                        Card(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                            Row(
+                                modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Investment", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium)
+                                BoxWithConstraints(Modifier.weight(1f)) {
+                                    val value = formatCurrency(investmentSpending)
+                                    val size = (maxWidth.value / (value.length.coerceAtLeast(1) * 0.54f)).coerceIn(16f, 24f).sp
+                                    Text(value, modifier = Modifier.fillMaxWidth(),
+                                        style = MaterialTheme.typography.titleLarge.copy(fontSize = size),
+                                        textAlign = TextAlign.End, color = Color(0xFF43A047),
+                                        fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                                }
+                            }
+                        }
+                        Card(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                            Row(
+                                modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Remaining", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium)
+                                BoxWithConstraints(Modifier.weight(1f)) {
+                                    val value = formatCurrency(savings)
+                                    val size = (maxWidth.value / (value.length.coerceAtLeast(1) * 0.54f)).coerceIn(16f, 24f).sp
+                                    Text(value, modifier = Modifier.fillMaxWidth(),
+                                        style = MaterialTheme.typography.titleLarge.copy(fontSize = size),
+                                        textAlign = TextAlign.End,
+                                        color = if (savings >= 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error,
+                                        fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                                }
+                            }
                         }
                     }
-                    Card(modifier = Modifier.weight(1f)) {
-                        Column(modifier = Modifier.padding(16.dp)) {
+                    Card(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                        Column(
+                            modifier = Modifier.fillMaxSize().padding(12.dp),
+                            verticalArrangement = Arrangement.Center
+                        ) {
                             Text("Expense", style = MaterialTheme.typography.labelMedium)
-                            Text(formatCurrency(expense), style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.error)
-                        }
-                    }
-                    Card(modifier = Modifier.weight(1f)) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            Text("Savings", style = MaterialTheme.typography.labelMedium)
-                            Text(formatCurrency(savings), style = MaterialTheme.typography.headlineSmall, color = if (savings >= 0) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error)
+                            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                                val expenseText = formatCurrency(displayedExpense)
+                                val expenseFontSize = (
+                                    maxWidth.value * 0.9f / (expenseText.length.coerceAtLeast(1) * 0.56f)
+                                ).coerceIn(32f, 64f).sp
+                                Text(
+                                    expenseText,
+                                    style = MaterialTheme.typography.headlineMedium.copy(fontSize = expenseFontSize),
+                                    color = MaterialTheme.colorScheme.error,
+                                    maxLines = 1
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Budgeted", style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(formatCurrency(displayedBudgetUsed), style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold, maxLines = 1)
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth().clickable(onClick = onNavigateToUnbudgetedTransactions),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Unbudgeted", style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    formatCurrency(displayedUnbudgeted),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.error,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1
+                                )
+                            }
                         }
                     }
                 }
@@ -126,6 +225,11 @@ fun DashboardScreen(
                             }
                             Spacer(modifier = Modifier.height(4.dp))
                             Text("Set monthly budgets", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                "${formatCurrency(budgetUsed)} / ${formatCurrency(budgetAmount)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
                     Card(
@@ -140,19 +244,12 @@ fun DashboardScreen(
                                 Text("Wishlist", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                             }
                             Spacer(modifier = Modifier.height(4.dp))
-                            if (wishlistItems.isEmpty()) {
-                                Text("Track your wants", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            } else {
-                                Text("${wishlistItems.size} items · ${formatCurrency(wishlistTotal)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                if (wishlistTotal > 0) {
-                                    val afterPurchase = savings - wishlistTotal
-                                    Text(
-                                        "After: ${formatCurrency(afterPurchase)} savings",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = if (afterPurchase >= 0) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error
-                                    )
-                                }
-                            }
+                            Text("Manage Wishlist", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                "${wishlistItems.size} ${if (wishlistItems.size == 1) "item" else "items"}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
                 }
@@ -290,6 +387,12 @@ fun TransactionRow(txn: TransactionEntity, categoryName: String?) {
     HorizontalDivider()
 }
 
+@Composable
 fun formatCurrency(amount: Double): String {
-    return String.format("%.0f", amount)
+    val currencyCode = LocalCurrencyCode.current
+    return NumberFormat.getCurrencyInstance(localeForCurrencyCode(currencyCode)).apply {
+        currency = java.util.Currency.getInstance(currencyCode)
+        minimumFractionDigits = 0
+        maximumFractionDigits = 0
+    }.format(amount)
 }

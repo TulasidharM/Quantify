@@ -45,6 +45,16 @@ private val MIGRATION_3_4: Migration = object : Migration(3, 4) {
     }
 }
 
+private val MIGRATION_4_5: Migration = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("DROP TABLE IF EXISTS recurring_rules")
+        db.execSQL("CREATE TABLE transactions_backup (id TEXT NOT NULL, amount REAL NOT NULL, type TEXT NOT NULL, categoryId TEXT NOT NULL, paymentMethodId TEXT, description TEXT, dateEpochSeconds INTEGER NOT NULL, createdAtEpochSeconds INTEGER NOT NULL, PRIMARY KEY(id))")
+        db.execSQL("INSERT INTO transactions_backup SELECT id, amount, type, categoryId, paymentMethodId, description, dateEpochSeconds, createdAtEpochSeconds FROM transactions")
+        db.execSQL("DROP TABLE transactions")
+        db.execSQL("ALTER TABLE transactions_backup RENAME TO transactions")
+    }
+}
+
 @Module
 @InstallIn(SingletonComponent::class)
 object AppModule {
@@ -56,7 +66,7 @@ object AppModule {
             context,
             QuantifyDatabase::class.java,
             "quantify_database"
-        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build()
+        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).build()
     }
 
     @Provides
@@ -70,9 +80,6 @@ object AppModule {
 
     @Provides
     fun provideBudgetDao(db: QuantifyDatabase) = db.budgetDao()
-
-    @Provides
-    fun provideRecurringRuleDao(db: QuantifyDatabase) = db.recurringRuleDao()
 
     @Provides
     fun provideWishlistItemDao(db: QuantifyDatabase) = db.wishlistItemDao()

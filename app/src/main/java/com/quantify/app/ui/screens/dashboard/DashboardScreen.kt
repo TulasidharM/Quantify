@@ -365,7 +365,7 @@ fun TransactionRow(txn: TransactionEntity, categoryName: String?) {
             Text(txn.description ?: "No description", style = MaterialTheme.typography.bodyMedium)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    "${dateStr.dayOfMonth}/${dateStr.monthNumber}/${dateStr.year}",
+                    "${dateStr.dayOfMonth}/${dateStr.monthNumber}/${dateStr.year} · ${dateStr.hour.toString().padStart(2, '0')}:${dateStr.minute.toString().padStart(2, '0')}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                 )

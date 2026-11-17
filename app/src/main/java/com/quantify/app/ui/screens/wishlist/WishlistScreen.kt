@@ -31,6 +31,7 @@ fun WishlistScreen(
     onAddItem: () -> Unit = {},
     monthlyBudgetedTotal: Double = 0.0,
     monthlyIncome: Double = 0.0,
+    monthlyUnbudgetedSpending: Double = 0.0,
     selectedYear: Int = 0,
     selectedMonth: Int = 0,
     viewModel: WishlistViewModel = hiltViewModel()
@@ -38,7 +39,7 @@ fun WishlistScreen(
     val items by viewModel.items.collectAsState()
     var selectedItemIds by remember(items) { mutableStateOf(items.map { it.id }.toSet()) }
     val selectedWishlistTotal = items.filter { it.id in selectedItemIds }.sumOf { it.targetAmount }
-    val overallTotal = monthlyBudgetedTotal + selectedWishlistTotal
+    val overallTotal = monthlyBudgetedTotal + monthlyUnbudgetedSpending + selectedWishlistTotal
     val estimatedSavingThisMonth = monthlyIncome - overallTotal
     val periodLabel = if (selectedYear > 0 && selectedMonth in 1..12) {
         "${Month.values()[selectedMonth - 1].name.lowercase().replaceFirstChar { it.uppercase() }} $selectedYear"
@@ -80,6 +81,7 @@ fun WishlistScreen(
                 WishlistSummary(
                     periodLabel = periodLabel,
                     monthlyBudgetedTotal = monthlyBudgetedTotal,
+                    monthlyUnbudgetedSpending = monthlyUnbudgetedSpending,
                     selectedWishlistTotal = selectedWishlistTotal,
                     overallTotal = overallTotal,
                     estimatedSavingThisMonth = estimatedSavingThisMonth,
@@ -140,6 +142,7 @@ fun WishlistScreen(
 private fun WishlistSummary(
     periodLabel: String,
     monthlyBudgetedTotal: Double,
+    monthlyUnbudgetedSpending: Double,
     selectedWishlistTotal: Double,
     overallTotal: Double,
     estimatedSavingThisMonth: Double,
@@ -155,6 +158,8 @@ private fun WishlistSummary(
                 color = MaterialTheme.colorScheme.onPrimaryContainer)
             Spacer(Modifier.height(8.dp))
             WishlistSummaryRow(label = "Budgeted", amount = formatCurrency(monthlyBudgetedTotal))
+            Spacer(Modifier.height(10.dp))
+            WishlistSummaryRow(label = "Unbudgeted spending", amount = formatCurrency(monthlyUnbudgetedSpending))
             Spacer(Modifier.height(10.dp))
             WishlistSummaryRow(
                 label = "Wishlist selected",

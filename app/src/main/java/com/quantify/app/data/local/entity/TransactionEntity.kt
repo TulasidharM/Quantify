@@ -1,13 +1,21 @@
 package com.quantify.app.data.local.entity
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import kotlinx.serialization.Serializable
 
 @Serializable
-@Entity(tableName = "transactions")
+@Entity(
+    tableName = "transactions",
+    indices = [
+        Index(value = ["dateEpochSeconds"]),
+        Index(value = ["type", "dateEpochSeconds"]),
+        Index(value = ["categoryId"])
+    ]
+)
 data class TransactionEntity(
     @PrimaryKey
     val id: String = generateId(),

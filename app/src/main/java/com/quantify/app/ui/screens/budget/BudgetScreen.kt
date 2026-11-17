@@ -1,8 +1,10 @@
 package com.quantify.app.ui.screens.budget
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -18,8 +20,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -81,27 +83,27 @@ fun BudgetScreen(
     val totalRemaining = totalBudget - totalSpent
     val overallRatio = if (totalBudget > 0) (totalSpent / totalBudget).coerceIn(0.0, 1.0) else 0.0
     val overallOverBudget = totalSpent > totalBudget
-
-    val summaryProgressColor = when {
-        overallOverBudget -> MaterialTheme.colorScheme.error
-        overallRatio >= 0.8 -> MaterialTheme.colorScheme.tertiary
-        else -> MaterialTheme.colorScheme.primary
+    val monthLabel = remember(periodYear, periodMonth) {
+        java.time.Month.of(periodMonth).getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.getDefault())
     }
-    val summaryTrackColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.4f)
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Budgets") },
+                title = {
+                    Column {
+                        Text("Budgets", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "$monthLabel $periodYear · Limits repeat monthly",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onClose) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
-                },
-                actions = {
-                    Text("Applies every month", style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(end = 16.dp))
                 }
             )
         },
@@ -113,180 +115,68 @@ fun BudgetScreen(
     ) { padding ->
         LazyColumn(
             modifier = Modifier.padding(padding),
-            contentPadding = PaddingValues(top = 8.dp, bottom = 96.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            contentPadding = PaddingValues(top = 10.dp, bottom = 104.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             if (budgets.isEmpty()) {
                 item {
-                    Column(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 72.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 42.dp),
+                        shape = RoundedCornerShape(28.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
                     ) {
-                        Icon(Icons.Outlined.Savings, contentDescription = null,
-                            modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)
-                        Spacer(Modifier.height(16.dp))
-                        Text("Give your spending a plan", style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.SemiBold)
-                        Spacer(Modifier.height(8.dp))
-                        Text("Set a monthly limit for a category and track how much you have left.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Spacer(Modifier.height(20.dp))
-                        Button(onClick = onAddBudget) {
-                            Icon(Icons.Default.Add, contentDescription = null)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Create a budget")
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 34.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                modifier = Modifier.size(68.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Outlined.Savings, contentDescription = null,
+                                        modifier = Modifier.size(32.dp), tint = MaterialTheme.colorScheme.primary)
+                                }
+                            }
+                            Spacer(Modifier.height(20.dp))
+                            Text("Give your spending a plan", style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.SemiBold)
+                            Spacer(Modifier.height(8.dp))
+                            Text("Set category limits once. They’ll apply every month, and you can track spending here.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                            Spacer(Modifier.height(22.dp))
+                            Button(onClick = onAddBudget) {
+                                Icon(Icons.Default.Add, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Create a budget")
+                            }
                         }
                     }
                 }
             } else {
-                // Summary cards
                 item("summary") {
-                    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
-                        // Overall progress card
-                        Card(
-                            shape = RoundedCornerShape(16.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-                            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-                        ) {
-                            Column(modifier = Modifier.padding(16.dp)) {
-                                Text(
-                                    "MONTHLY PLAN",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Row(verticalAlignment = Alignment.Bottom) {
-                                    Text(formatCurrency(totalBudget),
-                                    style = MaterialTheme.typography.headlineMedium,
-                                    fontWeight = FontWeight.Bold
-                                    )
-                                    Spacer(Modifier.width(8.dp))
-                                    Text("budgeted", style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(bottom = 4.dp))
-                                }
-                                Spacer(modifier = Modifier.height(12.dp))
-                                Box(modifier = Modifier.fillMaxWidth().height(8.dp)) {
-                                    Canvas(modifier = Modifier.matchParentSize()) {
-                                        val trackW = size.width
-                                        val trackH = size.height
-                                        val progressW = trackW * overallRatio.toFloat()
-                                        val radius = CornerRadius(trackH / 2f, trackH / 2f)
-                                        drawRoundRect(
-                                            color = summaryTrackColor,
-                                            size = Size(trackW, trackH),
-                                            cornerRadius = radius
-                                        )
-                                        if (progressW > 0) {
-                                            drawRoundRect(
-                                                color = summaryProgressColor,
-                                                size = Size(progressW, trackH),
-                                                cornerRadius = radius
-                                            )
-                                        }
-                                    }
-                                }
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text(
-                                        "${String.format("%.0f", if (totalBudget > 0) totalSpent / totalBudget * 100 else 0.0)}% used",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                                    )
-                                    Text(
-                                        if (overallOverBudget) "${formatCurrency(-totalRemaining)} over plan" else "${formatCurrency(totalRemaining)} left",
-                                        style = MaterialTheme.typography.bodySmall,
-                                            color = if (overallOverBudget) MaterialTheme.colorScheme.error
-                                        else MaterialTheme.colorScheme.primary
-                                    )
-                                }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        // Spent and Remaining cards (side by side)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            // Spent card
-                            Card(
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(16.dp),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-                                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-                            ) {
-                                Column(modifier = Modifier.padding(14.dp)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(
-                                            Icons.Outlined.ShoppingCartCheckout,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.error,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text(
-                                            "Spent",
-                                            style = MaterialTheme.typography.labelMedium,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        formatCurrency(totalSpent),
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.error
-                                    )
-                                }
-                            }
-
-                            // Remaining card
-                            Card(
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(16.dp),
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-                                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-                            ) {
-                                Column(modifier = Modifier.padding(14.dp)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(
-                                            Icons.Outlined.Savings,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text(
-                                            "Remaining",
-                                            style = MaterialTheme.typography.labelMedium,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        formatCurrency(totalRemaining),
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (totalRemaining < 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-                                    )
-                                }
-                            }
-                        }
-                    }
+                    BudgetOverviewCard(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        totalBudget = totalBudget,
+                        totalSpent = totalSpent,
+                        totalRemaining = totalRemaining,
+                        ratio = overallRatio,
+                        isOverBudget = overallOverBudget
+                    )
                 }
 
                 item("budget-section-title") {
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 2.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Category budgets", style = MaterialTheme.typography.titleMedium,
+                        Text("Category limits", style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                        Text("${budgets.size} ${if (budgets.size == 1) "category" else "categories"}",
-                            style = MaterialTheme.typography.labelMedium,
+                        Text("${budgets.size} ${if (budgets.size == 1) "limit" else "limits"}",
+                            style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
@@ -306,6 +196,7 @@ fun BudgetScreen(
                                 }
                             }
                         BudgetCard(
+                            modifier = Modifier.padding(horizontal = 16.dp),
                             parentBudget = parentBudgetWs,
                             categoryName = parentCat.name,
                             childBudgets = childList,
@@ -323,6 +214,7 @@ fun BudgetScreen(
                 orphanSubBudgets.forEach { orphanWs ->
                     item("orphan-${orphanWs.budget.categoryId}") {
                         OrphanBudgetCard(
+                            modifier = Modifier.padding(horizontal = 16.dp),
                             budgetWithSpending = orphanWs,
                             categoryName = categories.find { it.id == orphanWs.budget.categoryId }?.name ?: orphanWs.budget.categoryId,
                             onDelete = { viewModel.deleteBudget(orphanWs.budget) },
@@ -336,101 +228,206 @@ fun BudgetScreen(
 }
 
 @Composable
+private fun BudgetOverviewCard(
+    modifier: Modifier = Modifier,
+    totalBudget: Double,
+    totalSpent: Double,
+    totalRemaining: Double,
+    ratio: Double,
+    isOverBudget: Boolean
+) {
+    val progressColor = when {
+        isOverBudget -> MaterialTheme.colorScheme.error
+        ratio >= 0.8 -> MaterialTheme.colorScheme.tertiary
+        else -> MaterialTheme.colorScheme.primary
+    }
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(26.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Column(Modifier.padding(20.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    modifier = Modifier.size(44.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Outlined.Savings, contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(23.dp))
+                    }
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Monthly plan", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Text("Your combined category limits", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer) {
+                    Text("REPEATS MONTHLY", modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        fontWeight = FontWeight.SemiBold)
+                }
+            }
+
+            Spacer(Modifier.height(22.dp))
+            Text(formatCurrency(totalBudget), style = MaterialTheme.typography.headlineLarge,
+                fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+            Text("total budgeted", style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+            Spacer(Modifier.height(18.dp))
+            BudgetProgressBar(ratio = ratio, color = progressColor, height = 10.dp)
+            Spacer(Modifier.height(9.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("${String.format(java.util.Locale.getDefault(), "%.0f", ratio * 100)}% used",
+                    style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    if (isOverBudget) "${formatCurrency(-totalRemaining)} over limit" else "${formatCurrency(totalRemaining)} left",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (isOverBudget) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+
+            HorizontalDivider(Modifier.padding(vertical = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                BudgetSummaryValue("Spent", totalSpent, MaterialTheme.colorScheme.error, Modifier.weight(1f))
+                Box(Modifier.width(1.dp).height(34.dp).background(MaterialTheme.colorScheme.outlineVariant))
+                BudgetSummaryValue("Remaining", totalRemaining,
+                    if (totalRemaining < 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                    Modifier.weight(1f).padding(start = 16.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun BudgetSummaryValue(label: String, amount: Double, color: Color, modifier: Modifier = Modifier) {
+    Column(modifier) {
+        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(3.dp))
+        Text(formatCurrency(amount), style = MaterialTheme.typography.titleMedium, color = color,
+            fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+    }
+}
+
+@Composable
+private fun BudgetProgressBar(ratio: Double, color: Color, height: androidx.compose.ui.unit.Dp = 7.dp) {
+    Box(
+        Modifier.fillMaxWidth().height(height).clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+    ) {
+        Box(Modifier.fillMaxWidth(ratio.toFloat().coerceIn(0f, 1f)).fillMaxHeight()
+            .clip(CircleShape).background(color))
+    }
+}
+
+@Composable
+private fun BudgetStatus(ratio: Double, spent: Double, limit: Double) {
+    val overBy = spent - limit
+    Text(
+        if (overBy > 0) "Over by ${formatCurrency(overBy)}"
+        else "${String.format(java.util.Locale.getDefault(), "%.0f", ratio * 100)}% used",
+        style = MaterialTheme.typography.labelSmall,
+        color = if (overBy > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+        fontWeight = if (overBy > 0) FontWeight.SemiBold else FontWeight.Normal
+    )
+}
+
+@Composable
+private fun CategoryMark(name: String) {
+    Surface(shape = RoundedCornerShape(13.dp), color = MaterialTheme.colorScheme.primaryContainer,
+        modifier = Modifier.size(42.dp)) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(name.firstOrNull()?.uppercase() ?: "•", style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onPrimaryContainer, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+private fun BudgetAction(icon: androidx.compose.ui.graphics.vector.ImageVector, description: String, onClick: () -> Unit, danger: Boolean = false) {
+    Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        modifier = Modifier.size(36.dp).clickable(onClick = onClick)) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = description, modifier = Modifier.size(18.dp),
+                tint = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
 private fun OrphanBudgetCard(
+    modifier: Modifier = Modifier,
     budgetWithSpending: BudgetRepository.BudgetWithSpending,
     categoryName: String,
     onDelete: () -> Unit,
     onEdit: () -> Unit,
 ) {
-    val ratio = (budgetWithSpending.spent / budgetWithSpending.budget.amount).coerceIn(0.0, 1.0)
-    val overBudget = budgetWithSpending.spent > budgetWithSpending.budget.amount
+    val spent = budgetWithSpending.spent
+    val limit = budgetWithSpending.budget.amount
+    val ratio = if (limit > 0) spent / limit else 0.0
+    val overBudget = spent > limit
     val progressColor = when {
         overBudget -> MaterialTheme.colorScheme.error
         ratio >= 0.8 -> MaterialTheme.colorScheme.tertiary
         else -> MaterialTheme.colorScheme.primary
     }
-    val trackColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.4f)
-
     Card(
-        modifier = Modifier
-            .padding(horizontal = 16.dp, vertical = 6.dp)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onEdit
-            ),
-        shape = RoundedCornerShape(16.dp),
+        modifier = modifier.fillMaxWidth().clickable(
+            interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onEdit
+        ),
+        shape = RoundedCornerShape(22.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    categoryName,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    "${formatCurrency(budgetWithSpending.spent)} / ${formatCurrency(budgetWithSpending.budget.amount)}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                IconButton(onClick = onEdit, modifier = Modifier.size(32.dp)) {
-                    Icon(
-                        Icons.Default.Edit,
-                        contentDescription = "Edit",
-                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
-                        modifier = Modifier.size(18.dp)
-                    )
+        Column(Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CategoryMark(categoryName)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(categoryName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("Standalone category limit", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
-                    Icon(
-                        Icons.Outlined.DeleteOutline,
-                        contentDescription = "Delete",
-                        tint = MaterialTheme.colorScheme.error.copy(alpha = 0.5f),
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
+                BudgetAction(Icons.Default.Edit, "Edit $categoryName budget", onEdit)
+                Spacer(Modifier.width(8.dp))
+                BudgetAction(Icons.Outlined.DeleteOutline, "Delete $categoryName budget", onDelete, danger = true)
             }
-            Spacer(modifier = Modifier.height(12.dp))
-            Box(modifier = Modifier.fillMaxWidth().height(8.dp)) {
-                Canvas(modifier = Modifier.matchParentSize()) {
-                    val trackW = size.width
-                    val trackH = size.height
-                    val progressW = trackW * ratio.toFloat()
-                    val radius = CornerRadius(trackH / 2f, trackH / 2f)
-                    drawRoundRect(
-                        color = trackColor,
-                        size = Size(trackW, trackH),
-                        cornerRadius = radius
-                    )
-                    if (progressW > 0) {
-                        drawRoundRect(
-                            color = progressColor,
-                            size = Size(progressW, trackH),
-                            cornerRadius = radius
-                        )
-                    }
-                }
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                if (overBudget) "Over budget!"
-                else "${String.format("%.0f", ratio * 100)}% used",
-                style = MaterialTheme.typography.bodySmall,
-                color = if (overBudget) MaterialTheme.colorScheme.error
-                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                modifier = Modifier.align(Alignment.End)
-            )
+            Spacer(Modifier.height(18.dp))
+            BudgetAmountRow(spent, limit)
+            Spacer(Modifier.height(9.dp))
+            BudgetProgressBar(ratio, progressColor)
+            Spacer(Modifier.height(7.dp))
+            BudgetStatus(ratio, spent, limit)
+        }
+    }
+}
+
+@Composable
+private fun BudgetAmountRow(spent: Double, limit: Double) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
+        Column {
+            Text("SPENT", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(formatCurrency(spent), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
+                color = if (spent > limit) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                maxLines = 1, softWrap = false)
+        }
+        Column(horizontalAlignment = Alignment.End) {
+            Text("LIMIT", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(formatCurrency(limit), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface, maxLines = 1, softWrap = false)
         }
     }
 }
 
 @Composable
 private fun BudgetCard(
+    modifier: Modifier = Modifier,
     parentBudget: BudgetRepository.BudgetWithSpending,
     categoryName: String,
     childBudgets: List<Pair<CategoryEntity, BudgetRepository.BudgetWithSpending>>,
@@ -441,110 +438,60 @@ private fun BudgetCard(
     onEditParent: () -> Unit,
     onEditChild: (BudgetEntity) -> Unit,
 ) {
-    val ratio = (parentBudget.spent / parentBudget.budget.amount).coerceIn(0.0, 1.0)
-    val overBudget = parentBudget.spent > parentBudget.budget.amount
+    val spent = parentBudget.spent
+    val limit = parentBudget.budget.amount
+    val ratio = if (limit > 0) spent / limit else 0.0
+    val overBudget = spent > limit
     val progressColor = when {
         overBudget -> MaterialTheme.colorScheme.error
         ratio >= 0.8 -> MaterialTheme.colorScheme.tertiary
         else -> MaterialTheme.colorScheme.primary
     }
-    val trackColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.4f)
-
     Card(
-        modifier = Modifier
-            .padding(horizontal = 16.dp, vertical = 6.dp)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onEditParent
-            ),
-        shape = RoundedCornerShape(16.dp),
+        modifier = modifier.fillMaxWidth().clickable(
+            interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onEditParent
+        ),
+        shape = RoundedCornerShape(22.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            // Parent header
-            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    categoryName,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (canAddSubcategoryBudget) {
-                        IconButton(onClick = onAddSubcategoryBudget, modifier = Modifier.size(40.dp)) {
-                            Icon(Icons.Default.Add,
-                                contentDescription = "Add subcategory budget for $categoryName",
-                                tint = MaterialTheme.colorScheme.primary)
-                        }
-                    }
-                    IconButton(onClick = onDeleteParent, modifier = Modifier.size(40.dp)) {
-                        Icon(Icons.Outlined.DeleteOutline, contentDescription = "Delete $categoryName budget",
-                            tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
-                            modifier = Modifier.size(20.dp))
-                    }
+        Column(Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CategoryMark(categoryName)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(categoryName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        if (childBudgets.isEmpty()) "Category limit" else "${childBudgets.size} subcategory ${if (childBudgets.size == 1) "limit" else "limits"}",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
+                if (canAddSubcategoryBudget) {
+                    BudgetAction(Icons.Default.Add, "Add subcategory budget for $categoryName", onAddSubcategoryBudget)
+                    Spacer(Modifier.width(8.dp))
+                }
+                BudgetAction(Icons.Outlined.DeleteOutline, "Delete $categoryName budget", onDeleteParent, danger = true)
             }
 
-            Text(
-                "${formatCurrency(parentBudget.spent)} / ${formatCurrency(parentBudget.budget.amount)}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Spacer(Modifier.height(18.dp))
+            BudgetAmountRow(spent, limit)
+            Spacer(Modifier.height(9.dp))
+            BudgetProgressBar(ratio, progressColor)
+            Spacer(Modifier.height(7.dp))
+            BudgetStatus(ratio, spent, limit)
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Progress bar with rounded caps
-            Box(modifier = Modifier.fillMaxWidth().height(8.dp)) {
-                Canvas(modifier = Modifier.matchParentSize()) {
-                    val trackW = size.width
-                    val trackH = size.height
-                    val progressW = (trackW * ratio.toFloat())
-                    val radius = CornerRadius(trackH / 2f, trackH / 2f)
-
-                    drawRoundRect(
-                        color = trackColor,
-                        size = Size(trackW, trackH),
-                        cornerRadius = radius
-                    )
-
-                    if (progressW > 0) {
-                        drawRoundRect(
-                            color = progressColor,
-                            size = Size(progressW, trackH),
-                            cornerRadius = radius
+            if (childBudgets.isNotEmpty()) {
+                Spacer(Modifier.height(16.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    childBudgets.forEach { (cat, childWs) ->
+                        SubBudgetRow(
+                            budgetWithSpending = childWs,
+                            categoryName = cat.name,
+                            onDelete = { onDeleteChild(childWs.budget) },
+                            onEdit = { onEditChild(childWs.budget) }
                         )
                     }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Percentage text
-            Text(
-                if (overBudget) "Over budget!"
-                else "${String.format("%.0f", ratio * 100)}% used",
-                style = MaterialTheme.typography.bodySmall,
-                color = if (overBudget) MaterialTheme.colorScheme.error
-                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                modifier = Modifier.align(Alignment.End)
-            )
-
-            // Child budget rows
-            if (childBudgets.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(16.dp))
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                childBudgets.forEachIndexed { index, (cat, childWs) ->
-                    if (index > 0) Spacer(modifier = Modifier.height(12.dp))
-                    SubBudgetRow(
-                        budgetWithSpending = childWs,
-                        categoryName = cat.name,
-                        onDelete = { onDeleteChild(childWs.budget) },
-                        onEdit = { onEditChild(childWs.budget) }
-                    )
                 }
             }
         }
@@ -558,83 +505,39 @@ private fun SubBudgetRow(
     onDelete: () -> Unit,
     onEdit: () -> Unit,
 ) {
-    val ratio = (budgetWithSpending.spent / budgetWithSpending.budget.amount).coerceIn(0.0, 1.0)
-    val overBudget = budgetWithSpending.spent > budgetWithSpending.budget.amount
+    val spent = budgetWithSpending.spent
+    val limit = budgetWithSpending.budget.amount
+    val ratio = if (limit > 0) spent / limit else 0.0
+    val overBudget = spent > limit
     val progressColor = when {
         overBudget -> MaterialTheme.colorScheme.error
         ratio >= 0.8 -> MaterialTheme.colorScheme.tertiary
         else -> MaterialTheme.colorScheme.primary
     }
-    val trackColor = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.4f)
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = 20.dp)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onEdit
-            ),
-        verticalAlignment = Alignment.CenterVertically
+    Surface(
+        modifier = Modifier.fillMaxWidth().clickable(
+            interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onEdit
+        ),
+        shape = RoundedCornerShape(17.dp),
+        color = MaterialTheme.colorScheme.surface
     ) {
-        Column(modifier = Modifier.weight(1f)) {
+        Column(Modifier.padding(horizontal = 13.dp, vertical = 11.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    categoryName,
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.weight(1f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                IconButton(onClick = onEdit, modifier = Modifier.size(32.dp)) {
-                    Icon(
-                        Icons.Default.Edit,
-                        contentDescription = "Edit",
-                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
-                        modifier = Modifier.size(16.dp)
-                    )
+                Column(Modifier.weight(1f)) {
+                    Text(categoryName, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("${formatCurrency(spent)} / ${formatCurrency(limit)}", style = MaterialTheme.typography.bodySmall,
+                        color = if (overBudget) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1, softWrap = false)
                 }
-                IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
-                    Icon(
-                        Icons.Default.Close,
-                        contentDescription = "Delete",
-                        tint = MaterialTheme.colorScheme.error.copy(alpha = 0.5f),
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
+                BudgetAction(Icons.Default.Edit, "Edit $categoryName budget", onEdit)
+                Spacer(Modifier.width(8.dp))
+                BudgetAction(Icons.Default.Close, "Delete $categoryName budget", onDelete, danger = true)
             }
-
-            Text(
-                "${formatCurrency(budgetWithSpending.spent)} / ${formatCurrency(budgetWithSpending.budget.amount)}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            Spacer(modifier = Modifier.height(4.dp))
-
-            // Thin progress bar
-            Box(modifier = Modifier.fillMaxWidth().height(4.dp)) {
-                Canvas(modifier = Modifier.matchParentSize()) {
-                    val trackW = size.width
-                    val trackH = size.height
-                    val progressW = trackW * ratio.toFloat()
-                    val radius = CornerRadius(trackH / 2f, trackH / 2f)
-
-                    drawRoundRect(
-                        color = trackColor,
-                        size = Size(trackW, trackH),
-                        cornerRadius = radius
-                    )
-                    if (progressW > 0) {
-                        drawRoundRect(
-                            color = progressColor,
-                            size = Size(progressW, trackH),
-                            cornerRadius = radius
-                        )
-                    }
-                }
-            }
+            Spacer(Modifier.height(9.dp))
+            BudgetProgressBar(ratio, progressColor, height = 5.dp)
+            Spacer(Modifier.height(6.dp))
+            BudgetStatus(ratio, spent, limit)
         }
     }
 }

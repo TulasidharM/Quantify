@@ -36,6 +36,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun ManageScreen(
     onCsvImport: () -> Unit = {},
+    onBankStatementImport: () -> Unit = {},
     onCategories: () -> Unit = {},
     transactionViewModel: TransactionViewModel = hiltViewModel(),
     backupViewModel: BackupViewModel = hiltViewModel(),
@@ -46,11 +47,19 @@ fun ManageScreen(
     val defaultPaymentMethod by transactionViewModel.defaultPaymentMethod.collectAsState()
     val currency by backupViewModel.currency.collectAsState()
     val lastPhonePeImportEpoch by backupViewModel.lastPhonePeImportEpoch.collectAsState()
+    val lastBankImportEpoch by backupViewModel.lastBankImportEpoch.collectAsState()
     val localWebState by localWebViewModel.state.collectAsState()
     val localServerRunning = localWebState.url != null
     var showLocalWebDialog by remember { mutableStateOf(false) }
     val lastPhonePeImportLabel = remember(lastPhonePeImportEpoch) {
         lastPhonePeImportEpoch?.let { epoch ->
+            java.time.Instant.ofEpochSecond(epoch)
+                .atZone(java.time.ZoneId.systemDefault())
+                .format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy", java.util.Locale.getDefault()))
+        } ?: "Never"
+    }
+    val lastBankImportLabel = remember(lastBankImportEpoch) {
+        lastBankImportEpoch?.let { epoch ->
             java.time.Instant.ofEpochSecond(epoch)
                 .atZone(java.time.ZoneId.systemDefault())
                 .format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy", java.util.Locale.getDefault()))
@@ -184,6 +193,19 @@ fun ManageScreen(
             }
             item {
                 ListItem(
+                    leadingContent = { Icon(Icons.Default.PictureAsPdf, contentDescription = "Import bank statement") },
+                    headlineContent = { Text("Import bank statement PDF") },
+                    supportingContent = {
+                        Column {
+                            Text("Extract transactions from most searchable or scanned bank PDFs")
+                            Text("Last import: $lastBankImportLabel")
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth().clickable(onClick = onBankStatementImport)
+                )
+            }
+            item {
+                ListItem(
                     leadingContent = { Icon(Icons.Default.Computer, contentDescription = "Laptop access") },
                     headlineContent = { Text("Use Quantify on laptop") },
                     supportingContent = {
@@ -191,14 +213,31 @@ fun ManageScreen(
                             Text("Open your data in a browser on the same Wi-Fi")
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Box(Modifier.size(8.dp).clip(CircleShape).background(if (localServerRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline))
-                                Text(if (localServerRunning) "Server running · phone screen stays on" else "Server off", style = MaterialTheme.typography.bodySmall,
+                                Text(when {
+                                    localServerRunning -> "Server running · phone screen stays on"
+                                    localWebState.starting -> "Starting server…"
+                                    else -> "Server off"
+                                }, style = MaterialTheme.typography.bodySmall,
                                     color = if (localServerRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     },
+                    trailingContent = {
+                        Switch(
+                            checked = localServerRunning,
+                            enabled = !localWebState.starting,
+                            onCheckedChange = { enabled ->
+                                if (enabled) {
+                                    showLocalWebDialog = true
+                                    localWebViewModel.start()
+                                } else {
+                                    localWebViewModel.stop()
+                                }
+                            }
+                        )
+                    },
                     modifier = Modifier.fillMaxWidth().clickable {
                         showLocalWebDialog = true
-                        localWebViewModel.start()
                     }
                 )
             }
@@ -235,7 +274,7 @@ fun ManageScreen(
                             style = MaterialTheme.typography.bodyMedium,
                             color = if (localServerRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    Text("Laptop access starts with Quantify. Connect both devices to the same Wi-Fi network.")
+                    Text("Turn on laptop access only while you need it. Connect both devices to the same Wi-Fi network.")
                     when {
                         localWebState.error != null -> Text(localWebState.error!!, color = MaterialTheme.colorScheme.error)
                         localWebState.url != null -> {
@@ -246,17 +285,23 @@ fun ManageScreen(
                                 clipboard.setPrimaryClip(ClipData.newPlainText("Quantify laptop link", localWebState.url))
                             }) { Text("Copy address") }
                         }
-                        else -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        localWebState.starting -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                             Text("Starting local access…")
                         }
+                        else -> Text("Turn on laptop access to start the server and show its address.", style = MaterialTheme.typography.bodySmall)
                     }
-                    Text("Changes sync directly to your phone. Stop access when you finish.", style = MaterialTheme.typography.bodySmall)
+                    if (localServerRunning) Text("Changes sync directly to your phone. The phone screen stays on while access is enabled.", style = MaterialTheme.typography.bodySmall)
                 }
             },
-            confirmButton = { TextButton(onClick = { showLocalWebDialog = false }) { Text("Done") } },
-            dismissButton = {
-                if (localWebState.url != null) TextButton(onClick = { localWebViewModel.stop(); showLocalWebDialog = false }) { Text("Stop access") }
+            confirmButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Button(
+                        onClick = { if (localServerRunning) localWebViewModel.stop() else localWebViewModel.start() },
+                        enabled = !localWebState.starting
+                    ) { Text(if (localServerRunning) "Turn off" else "Turn on") }
+                    TextButton(onClick = { showLocalWebDialog = false }) { Text("Done") }
+                }
             }
         )
     }

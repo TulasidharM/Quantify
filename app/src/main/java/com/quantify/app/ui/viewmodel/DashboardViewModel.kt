@@ -94,25 +94,30 @@ class DashboardViewModel @Inject constructor(
     }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
 
+    private val selectedMonthBudgets = combine(selectedYearFlow, selectedMonthFlow) { year, month -> year to month }
+        .flatMapLatest { (year, month) -> budgetRepository.getBudgetsWithSpending(year, month) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     val monthlyBudgetSpentTotal: StateFlow<Double> = combine(
-        selectedYearFlow, selectedMonthFlow, allCategories
-    ) { year, month, categories -> Triple(year, month, categories) }
-        .flatMapLatest { (year, month, categories) ->
-            budgetRepository.getBudgetsWithSpending(year, month).map { budgets ->
+        selectedMonthBudgets, allCategories
+    ) { budgets, categories ->
                 val budgetByCategory = budgets.associateBy { it.budget.categoryId }
                 budgets.sumOf { budget ->
                     val parentId = categories.firstOrNull { it.id == budget.budget.categoryId }?.parentId
                     if (parentId == null || parentId !in budgetByCategory) budget.spent else 0.0
                 }
-            }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
 
+    val monthlyUnbudgetedSpending: StateFlow<Double> = combine(
+        monthlyExpense, monthlyBudgetSpentTotal
+    ) { expense, budgetedSpend ->
+        (expense - budgetedSpend).coerceAtLeast(0.0)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+
     val monthlyInvestmentBudgetSpentTotal: StateFlow<Double> = combine(
-        selectedYearFlow, selectedMonthFlow, allCategories
-    ) { year, month, categories -> Triple(year, month, categories) }
-        .flatMapLatest { (year, month, categories) ->
-            budgetRepository.getBudgetsWithSpending(year, month).map { budgets ->
+        selectedMonthBudgets, allCategories
+    ) { budgets, categories ->
                 val investmentRoot = categories.firstOrNull {
                     it.parentId == null && it.type == "EXPENSE" && it.name.equals("Investment", ignoreCase = true)
                 }
@@ -137,7 +142,6 @@ class DashboardViewModel @Inject constructor(
                         ) budget.spent else 0.0
                     }
                 }
-            }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
 

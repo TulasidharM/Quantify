@@ -69,6 +69,9 @@ class BackupViewModel @Inject constructor(
     val lastPhonePeImportEpoch = dataStore.data.map { prefs ->
         prefs[CsvImportPreferences.lastPhonePeImportEpoch]
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+    val lastBankImportEpoch = dataStore.data.map { prefs ->
+        prefs[CsvImportPreferences.lastBankImportEpoch]
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     fun setCurrency(currency: String) {
         viewModelScope.launch {
@@ -353,7 +356,7 @@ class BackupViewModel @Inject constructor(
                 return try {
                     val instant = java.time.Instant.ofEpochSecond(epochSeconds)
                     val date = java.time.LocalDateTime.ofInstant(instant, java.time.ZoneId.systemDefault())
-                    date.format(java.time.format.DateTimeFormatter.ofPattern("dd MMM yyyy", locale))
+                    date.format(java.time.format.DateTimeFormatter.ofPattern("dd MMM HH:mm", locale))
                 } catch (e: Exception) {
                     "-"
                 }
@@ -546,7 +549,7 @@ class BackupViewModel @Inject constructor(
             // ---------------------------------------------------------
             // TRANSACTION TABLE PAGE
             // ---------------------------------------------------------
-            val dateWidth = 75f
+            val dateWidth = 86f
             val categoryWidth = 100f
             val amountWidth = 105f
             val descriptionWidth = CONTENT_WIDTH - dateWidth - categoryWidth - amountWidth
@@ -567,7 +570,7 @@ class BackupViewModel @Inject constructor(
                 // Header background
                 drawRoundedRect(canvas, MARGIN, tableTop.toFloat(), PAGE_WIDTH.toFloat() - MARGIN, tableTop + tableHeaderHeight, 5f, NAVY)
                 val headerTop = tableTop + 9f
-                drawTextOnCanvas(canvas, "DATE", colDate + 5f, headerTop, paint(WHITE, 8f, true))
+                drawTextOnCanvas(canvas, "DATE / TIME", colDate + 5f, headerTop, paint(WHITE, 8f, true))
                 drawTextOnCanvas(canvas, "DESCRIPTION", colDescription + 5f, headerTop, paint(WHITE, 8f, true))
                 drawTextOnCanvas(canvas, "CATEGORY", colCategory + 5f, headerTop, paint(WHITE, 8f, true))
                 drawRightText(canvas, "AMOUNT", PAGE_WIDTH.toFloat() - MARGIN - 5f, headerTop, paint(WHITE, 8f, true))

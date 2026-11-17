@@ -135,16 +135,22 @@ fun EditTransactionScreen(
     ) { padding ->
         Column(modifier = Modifier.padding(padding).fillMaxWidth()) {
             var showDatePicker by remember { mutableStateOf(false) }
+            var showTimePicker by remember { mutableStateOf(false) }
+            val timePickerState = rememberTimePickerState(
+                initialHour = date.hour,
+                initialMinute = date.minute,
+                is24Hour = true
+            )
             val datePickerState = rememberDatePickerState(
-                initialSelectedDateMillis = date.toInstant(TimeZone.currentSystemDefault()).epochSeconds * 1000
+                initialSelectedDateMillis = date.toInstant(TimeZone.UTC).epochSeconds * 1000
             )
             LaunchedEffect(date) {
-                datePickerState.selectedDateMillis = date.toInstant(TimeZone.currentSystemDefault()).epochSeconds * 1000
+                datePickerState.selectedDateMillis = date.toInstant(TimeZone.UTC).epochSeconds * 1000
             }
             val dateStr = "${date.year}-${date.monthNumber.toString().padStart(2, '0')}-${date.dayOfMonth.toString().padStart(2, '0')}"
 
-            // Type selector + Date
-            Row(modifier = Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            // Type selector, date, and time
+            Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 FilterChip(
                     selected = type == "EXPENSE",
                     onClick = { type = "EXPENSE" },
@@ -155,14 +161,30 @@ fun EditTransactionScreen(
                     onClick = { type = "INCOME" },
                     label = { Text("Income") }
                 )
-                Spacer(modifier = Modifier.weight(1f))
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 OutlinedButton(
                     onClick = { showDatePicker = true },
+                    modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.outlinedButtonColors(
                         contentColor = MaterialTheme.colorScheme.onSurface
                     )
                 ) {
                     Text("📅  $dateStr")
+                }
+                OutlinedButton(
+                    onClick = {
+                        timePickerState.hour = date.hour
+                        timePickerState.minute = date.minute
+                        showTimePicker = true
+                    },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
+                ) {
+                    Text("🕒  ${date.hour.toString().padStart(2, '0')}:${date.minute.toString().padStart(2, '0')}")
                 }
             }
 
@@ -193,8 +215,12 @@ fun EditTransactionScreen(
                     confirmButton = {
                         TextButton(onClick = {
                             datePickerState.selectedDateMillis?.let { millis ->
-                                date = kotlinx.datetime.Instant.fromEpochMilliseconds(millis)
-                                    .toLocalDateTime(TimeZone.currentSystemDefault())
+                                val selectedDate = kotlinx.datetime.Instant.fromEpochMilliseconds(millis)
+                                    .toLocalDateTime(TimeZone.UTC).date
+                                date = LocalDateTime(
+                                    selectedDate.year, selectedDate.monthNumber, selectedDate.dayOfMonth,
+                                    date.hour, date.minute
+                                )
                             }
                             showDatePicker = false
                         }) { Text("OK") }
@@ -205,6 +231,26 @@ fun EditTransactionScreen(
                 ) {
                     DatePicker(state = datePickerState)
                 }
+            }
+
+            if (showTimePicker) {
+                AlertDialog(
+                    onDismissRequest = { showTimePicker = false },
+                    title = { Text("Transaction time") },
+                    text = { TimePicker(state = timePickerState) },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            date = LocalDateTime(
+                                date.year, date.monthNumber, date.dayOfMonth,
+                                timePickerState.hour, timePickerState.minute
+                            )
+                            showTimePicker = false
+                        }) { Text("OK") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showTimePicker = false }) { Text("Cancel") }
+                    }
+                )
             }
 
             // Category

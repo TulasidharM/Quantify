@@ -18,9 +18,11 @@ import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.PieChart
+import androidx.compose.material.icons.filled.Savings
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.PieChart
+import androidx.compose.material.icons.outlined.Savings
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -30,7 +32,7 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -41,6 +43,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.quantify.app.data.local.entity.BudgetEntity
@@ -67,7 +70,8 @@ import kotlinx.coroutines.launch
 private data class BottomNavItem(
     val label: String,
     val icon: ImageVector,
-    val selectedIcon: ImageVector
+    val selectedIcon: ImageVector,
+    val page: Int?
 )
 
 @AndroidEntryPoint
@@ -100,32 +104,41 @@ private fun AppContent() {
 @Composable
 private fun AppContentInner(backupViewModel: BackupViewModel, currentTheme: String) {
     val activity = LocalContext.current as ComponentActivity
+    val composeView = LocalView.current
     val localWebViewModel: LocalWebViewModel = hiltViewModel(activity)
     val localWebState by localWebViewModel.state.collectAsState()
-    LaunchedEffect(localWebViewModel) { localWebViewModel.start() }
-    DisposableEffect(activity.window, localWebState.url) {
-        if (localWebState.url != null) {
+    val keepScreenOn = localWebState.url != null || localWebState.starting
+    SideEffect {
+        composeView.keepScreenOn = keepScreenOn
+        if (keepScreenOn) {
             activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         } else {
             activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
-        onDispose { activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
+    }
+    DisposableEffect(activity.window, composeView) {
+        onDispose {
+            composeView.keepScreenOn = false
+            activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
     }
 
     val items = listOf(
-        BottomNavItem("Home", Icons.Outlined.Home, Icons.Default.Home),
-        BottomNavItem("Transactions", Icons.AutoMirrored.Outlined.ReceiptLong, Icons.AutoMirrored.Filled.ReceiptLong),
-        BottomNavItem("Stats", Icons.Outlined.PieChart, Icons.Default.PieChart),
-        BottomNavItem("Manage", Icons.Outlined.Settings, Icons.Default.Settings)
+        BottomNavItem("Home", Icons.Outlined.Home, Icons.Default.Home, page = 0),
+        BottomNavItem("Transactions", Icons.AutoMirrored.Outlined.ReceiptLong, Icons.AutoMirrored.Filled.ReceiptLong, page = 1),
+        BottomNavItem("Budgets", Icons.Outlined.Savings, Icons.Default.Savings, page = null),
+        BottomNavItem("Stats", Icons.Outlined.PieChart, Icons.Default.PieChart, page = 2),
+        BottomNavItem("Manage", Icons.Outlined.Settings, Icons.Default.Settings, page = 3)
     )
 
-    val pagerState = rememberPagerState(pageCount = { items.size })
+    val pagerState = rememberPagerState(pageCount = { 4 })
     val scope = rememberCoroutineScope()
 
     // Overlay state for secondary routes (add/edit transaction, csv import, categories, budget, wishlist)
     var showAddTransaction by remember { mutableStateOf(false) }
     var editTransactionId by remember { mutableStateOf<String?>(null) }
     var showCsvImport by remember { mutableStateOf(false) }
+    var showBankImport by remember { mutableStateOf(false) }
     var showCategories by remember { mutableStateOf(false) }
     var showBudget by remember { mutableStateOf(false) }
     var showAddBudget by remember { mutableStateOf(false) }
@@ -140,6 +153,7 @@ private fun AppContentInner(backupViewModel: BackupViewModel, currentTheme: Stri
     val transactionViewModel: TransactionViewModel = hiltViewModel(activity)
     val dashboardBudgetedTotal by dashboardViewModel.monthlyBudgetedTotal.collectAsState()
     val dashboardIncome by dashboardViewModel.monthlyIncome.collectAsState()
+    val dashboardUnbudgetedSpending by dashboardViewModel.monthlyUnbudgetedSpending.collectAsState()
     val dashboardYear by dashboardViewModel.selectedYearFlow.collectAsState()
     val dashboardMonth by dashboardViewModel.selectedMonthFlow.collectAsState()
 
@@ -185,7 +199,7 @@ private fun AppContentInner(backupViewModel: BackupViewModel, currentTheme: Stri
     }
 
     // Handle back press: close overlays, then navigate to Home, then exit
-    BackHandler(enabled = showAddTransaction || editTransactionId != null || showCsvImport || showCategories || showBudget || showAddBudget || showWishlist || showAddWishlist) {
+    BackHandler(enabled = showAddTransaction || editTransactionId != null || showCsvImport || showBankImport || showCategories || showBudget || showAddBudget || showWishlist || showAddWishlist) {
         if (showAddTransaction) {
             showAddTransaction = false
         } else if (editTransactionId != null) {
@@ -193,6 +207,8 @@ private fun AppContentInner(backupViewModel: BackupViewModel, currentTheme: Stri
             transactionViewModel.clearLoadedTransaction()
         } else if (showCsvImport) {
             showCsvImport = false
+        } else if (showBankImport) {
+            showBankImport = false
         } else if (showCategories) {
             showCategories = false
         } else if (showAddBudget) {
@@ -208,7 +224,7 @@ private fun AppContentInner(backupViewModel: BackupViewModel, currentTheme: Stri
         }
     }
 
-    BackHandler(enabled = pagerState.currentPage != 0 && !showAddTransaction && editTransactionId == null && !showCsvImport && !showCategories && !showBudget && !showAddBudget && !showWishlist && !showAddWishlist) {
+    BackHandler(enabled = pagerState.currentPage != 0 && !showAddTransaction && editTransactionId == null && !showCsvImport && !showBankImport && !showCategories && !showBudget && !showAddBudget && !showWishlist && !showAddWishlist) {
         scope.launch { pagerState.scrollToPage(0) }
         transactionViewModel.clearFilterCategory()
     }
@@ -258,7 +274,9 @@ private fun AppContentInner(backupViewModel: BackupViewModel, currentTheme: Stri
                         3 -> ManageScreen(
                             transactionViewModel = transactionViewModel,
                             backupViewModel = backupViewModel,
+                            localWebViewModel = localWebViewModel,
                             onCsvImport = { showCsvImport = true },
+                            onBankStatementImport = { showBankImport = true },
                             onCategories = { showCategories = true }
                         )
                     }
@@ -283,6 +301,9 @@ private fun AppContentInner(backupViewModel: BackupViewModel, currentTheme: Stri
                 }
                 if (showCsvImport) {
                     CsvImportScreen(onClose = { showCsvImport = false })
+                }
+                if (showBankImport) {
+                    CsvImportScreen(onClose = { showBankImport = false }, bankStatement = true)
                 }
                 if (showCategories) {
                     CategoriesScreen(
@@ -317,6 +338,7 @@ private fun AppContentInner(backupViewModel: BackupViewModel, currentTheme: Stri
                         onAddItem = { showAddWishlist = true },
                         monthlyBudgetedTotal = dashboardBudgetedTotal,
                         monthlyIncome = dashboardIncome,
+                        monthlyUnbudgetedSpending = dashboardUnbudgetedSpending,
                         selectedYear = dashboardYear,
                         selectedMonth = dashboardMonth
                     )
@@ -329,7 +351,8 @@ private fun AppContentInner(backupViewModel: BackupViewModel, currentTheme: Stri
             // NavigationBar as sibling — always receives touches
             NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceVariant) {
                 items.forEachIndexed { index, item ->
-                    val isSelected = pagerState.currentPage == index
+                    val isBudgetsItem = item.page == null
+                    val isSelected = if (isBudgetsItem) showBudget else !showBudget && pagerState.currentPage == item.page
                     NavigationBarItem(
                         selected = isSelected,
                         onClick = {
@@ -342,8 +365,13 @@ private fun AppContentInner(backupViewModel: BackupViewModel, currentTheme: Stri
                             editingBudget = null
                             showWishlist = false
                             showAddWishlist = false
-                            if (index == 1) transactionViewModel.clearFilterCategory()
-                            scope.launch { pagerState.scrollToPage(index) }
+                            if (isBudgetsItem) {
+                                showBudget = true
+                            } else {
+                                val page = item.page ?: 0
+                                if (page == 1) transactionViewModel.clearFilterCategory()
+                                scope.launch { pagerState.scrollToPage(page) }
+                            }
                         },
                         colors = NavigationBarItemDefaults.colors(
                             indicatorColor = MaterialTheme.colorScheme.primaryContainer,

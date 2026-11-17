@@ -494,7 +494,15 @@ fun TransactionListItem(
                 if (showDate) {
                     val dateStr = transaction.date.toLocalDateTime(TimeZone.currentSystemDefault())
                     Text(
-                        "${dateStr.dayOfMonth}/${dateStr.monthNumber}",
+                        "${dateStr.dayOfMonth}/${dateStr.monthNumber} · ${dateStr.hour.toString().padStart(2, '0')}:${dateStr.minute.toString().padStart(2, '0')}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                    )
+                }
+                if (!showDate) {
+                    val time = transaction.date.toLocalDateTime(TimeZone.currentSystemDefault())
+                    Text(
+                        "${time.hour.toString().padStart(2, '0')}:${time.minute.toString().padStart(2, '0')}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                     )

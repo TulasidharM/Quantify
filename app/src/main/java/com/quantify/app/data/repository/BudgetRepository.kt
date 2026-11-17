@@ -60,14 +60,15 @@ class BudgetRepository @Inject constructor(
                 .groupBy({ it.parentId!! }, { it.id })
                 .mapValues { it.value.toSet() }
 
+            val spentByCategory = tList.asSequence()
+                .filter { it.type == "EXPENSE" }
+                .groupingBy { it.categoryId }
+                .fold(0.0) { total, transaction -> total + transaction.amount }
+
             bList.map { budget ->
                 // Collect all subcategory IDs under this budget's category
                 val subIds = collectAllDescendants(budget.categoryId, childrenOf)
-                val spent = tList
-                    .filter { tx ->
-                        tx.type == "EXPENSE" && (tx.categoryId == budget.categoryId || subIds.contains(tx.categoryId))
-                    }
-                    .sumOf { it.amount }
+                val spent = (subIds + budget.categoryId).sumOf { spentByCategory[it] ?: 0.0 }
                 BudgetWithSpending(budget, spent)
             }
         }

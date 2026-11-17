@@ -17,6 +17,7 @@ import com.quantify.app.data.repository.PaymentMethodRepository
 import com.quantify.app.data.repository.TransactionRepository
 import com.quantify.app.data.repository.WishlistItemRepository
 import com.quantify.app.ui.screens.csvimport.CsvImportPreferences
+import com.quantify.app.ui.screens.csvimport.ParsedCsvRow
 import com.quantify.app.ui.screens.csvimport.findPossibleDuplicates
 import com.quantify.app.ui.screens.csvimport.parsePhonePeCsv
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -37,7 +38,7 @@ import java.time.Instant
 import java.time.ZoneId
 import javax.inject.Inject
 
-data class LocalWebState(val url: String? = null, val error: String? = null)
+data class LocalWebState(val url: String? = null, val error: String? = null, val starting: Boolean = false)
 
 @Serializable
 data class LocalWebPayload(
@@ -59,13 +60,13 @@ data class LocalWebPayload(
 )
 
 @Serializable
-data class LocalWebTransaction(val id: String, val date: String, val type: String, val categoryId: String, val category: String, val paymentMethodId: String? = null, val description: String = "", val amount: Double)
+data class LocalWebTransaction(val id: String, val date: String, val time: String, val type: String, val categoryId: String, val category: String, val paymentMethodId: String? = null, val description: String = "", val amount: Double)
 
 @Serializable
 data class LocalWebBudget(val id: String, val categoryId: String, val amount: Double, val spent: Double)
 
 @Serializable
-data class WebTransactionInput(val id: String? = null, val amount: Double, val type: String, val categoryId: String, val paymentMethodId: String? = null, val description: String? = null, val date: String)
+data class WebTransactionInput(val id: String? = null, val amount: Double, val type: String, val categoryId: String, val paymentMethodId: String? = null, val description: String? = null, val date: String, val time: String = "00:00")
 
 @Serializable
 data class WebCategoryInput(val id: String? = null, val name: String, val type: String, val parentId: String? = null)
@@ -114,6 +115,7 @@ class LocalWebViewModel @Inject constructor(
     fun start() {
         if (server != null || starting) return
         starting = true
+        _state.value = LocalWebState(starting = true)
         viewModelScope.launch {
             try {
                 val lanServer = QuantifyLanServer({ query -> loadPayload(query) }, { method, path, body -> handleAction(method, path, body) })
@@ -186,6 +188,7 @@ class LocalWebViewModel @Inject constructor(
                 LocalWebTransaction(
                     id = transaction.id,
                     date = Instant.ofEpochSecond(transaction.dateEpochSeconds).atZone(ZoneId.systemDefault()).toLocalDate().toString(),
+                    time = Instant.ofEpochSecond(transaction.dateEpochSeconds).atZone(ZoneId.systemDefault()).toLocalTime().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm")),
                     type = transaction.type,
                     categoryId = transaction.categoryId,
                     category = categories[transaction.categoryId]?.name ?: "Uncategorized",
@@ -216,7 +219,7 @@ class LocalWebViewModel @Inject constructor(
                     val rows = parsePhonePeCsv(input.csv)
                     require(rows.isNotEmpty()) { "No valid PhonePe transactions found in this CSV." }
                     val categories = categoryRepository.getAll().first().associateBy { it.id }
-                    val existing = transactionRepository.getAll().first()
+                    val existing = loadExistingForRows(rows)
                     val preview = WebPhonePePreview(rows.map { row ->
                         val duplicates = findPossibleDuplicates(row, existing).map { transaction ->
                             val transactionDate = Instant.ofEpochSecond(transaction.dateEpochSeconds)
@@ -246,7 +249,7 @@ class LocalWebViewModel @Inject constructor(
                     val itemsByIndex = input.items.associateBy { it.index }
                     require(itemsByIndex.size == rows.size && rows.indices.all(itemsByIndex::containsKey)) { "Invalid import rows." }
                     val categories = categoryRepository.getAll().first()
-                    val existing = transactionRepository.getAll().first()
+                    val existing = loadExistingForRows(rows)
                     rows.forEach { row ->
                         val item = itemsByIndex.getValue(row.index)
                         if (item.ignored) return@forEach
@@ -258,13 +261,12 @@ class LocalWebViewModel @Inject constructor(
                             require(item.duplicateReviewed) { "Review the possible duplicate transactions before importing." }
                         }
                     }
-                    var saved = 0
+                    val toSave = mutableListOf<TransactionEntity>()
                     rows.forEach { row ->
                         val item = itemsByIndex.getValue(row.index)
                         if (item.ignored) return@forEach
                         val type = if (row.direction.name == "PAID") "EXPENSE" else "INCOME"
-                        transactionRepository.insert(
-                            TransactionEntity(
+                        toSave += TransactionEntity(
                                 amount = row.amount,
                                 type = type,
                                 categoryId = item.categoryId!!,
@@ -272,9 +274,9 @@ class LocalWebViewModel @Inject constructor(
                                 description = item.label.ifBlank { row.vendor },
                                 dateEpochSeconds = row.epochSeconds
                             )
-                        )
-                        saved++
                     }
+                    transactionRepository.insertAll(toSave)
+                    val saved = toSave.size
                     dataStore.edit { prefs -> prefs[CsvImportPreferences.lastPhonePeImportEpoch] = Clock.System.now().epochSeconds }
                     return LanApiResponse(body = Json.encodeToString(mapOf("saved" to saved)))
                 }
@@ -285,7 +287,9 @@ class LocalWebViewModel @Inject constructor(
                         val input = Json.decodeFromString<WebTransactionInput>(body)
                         require(input.amount > 0 && input.type in setOf("INCOME", "EXPENSE"))
                         require(categoryRepository.getAll().first().any { it.id == input.categoryId && it.type == input.type }) { "Choose a category that matches the transaction type" }
-                        val epoch = java.time.LocalDate.parse(input.date).atStartOfDay(ZoneId.systemDefault()).toEpochSecond()
+                        val epoch = java.time.LocalDate.parse(input.date)
+                            .atTime(java.time.LocalTime.parse(input.time))
+                            .atZone(ZoneId.systemDefault()).toEpochSecond()
                         val existing = input.id?.let { transactionRepository.getById(it) }
                         val txn = TransactionEntity(id = input.id ?: TransactionEntity.generateId(), amount = input.amount, type = input.type,
                             categoryId = input.categoryId, paymentMethodId = input.paymentMethodId, description = input.description,
@@ -356,6 +360,12 @@ class LocalWebViewModel @Inject constructor(
         } catch (error: Exception) {
             LanApiResponse(400, Json.encodeToString(mapOf("error" to (error.message ?: "Invalid request"))))
         }
+    }
+
+    private suspend fun loadExistingForRows(rows: List<ParsedCsvRow>): List<TransactionEntity> {
+        val first = rows.minOfOrNull { it.epochSeconds } ?: return emptyList()
+        val last = rows.maxOfOrNull { it.epochSeconds } ?: return emptyList()
+        return transactionRepository.getByDateRange(first - 86_400, last + 172_800).first()
     }
 
     private fun methodError() = LanApiResponse(405, "{\"error\":\"Unsupported method\"}")

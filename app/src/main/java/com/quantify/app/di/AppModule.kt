@@ -55,6 +55,14 @@ private val MIGRATION_4_5: Migration = object : Migration(4, 5) {
     }
 }
 
+private val MIGRATION_5_6: Migration = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_transactions_dateEpochSeconds ON transactions(dateEpochSeconds)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_transactions_type_dateEpochSeconds ON transactions(type, dateEpochSeconds)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS index_transactions_categoryId ON transactions(categoryId)")
+    }
+}
+
 @Module
 @InstallIn(SingletonComponent::class)
 object AppModule {
@@ -66,7 +74,7 @@ object AppModule {
             context,
             QuantifyDatabase::class.java,
             "quantify_database"
-        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).build()
+        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6).build()
     }
 
     @Provides

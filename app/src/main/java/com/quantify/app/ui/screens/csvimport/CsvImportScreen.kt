@@ -34,6 +34,7 @@ import kotlinx.datetime.LocalDateTime
 @Composable
 fun CsvImportScreen(
     onClose: () -> Unit,
+    bankStatement: Boolean = false,
     viewModel: CsvImportViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsState()
@@ -55,11 +56,24 @@ fun CsvImportScreen(
     val csvLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let { viewModel.loadCsv(it) }
     }
+    var pdfPassword by remember { mutableStateOf("") }
+    val pdfLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let { viewModel.loadBankStatementPdf(it, pdfPassword) }
+    }
 
     when (state.status) {
         CsvImportStatus.IDLE -> {
-            CsvImportIdleScreen(onPickCsv = { csvLauncher.launch(arrayOf("text/csv", "application/vnd.ms-excel", "text/comma-separated-values")) })
+            CsvImportIdleScreen(
+                bankStatement = bankStatement,
+                password = pdfPassword,
+                onPasswordChange = { pdfPassword = it },
+                onPickCsv = {
+                    if (bankStatement) pdfLauncher.launch(arrayOf("application/pdf"))
+                    else csvLauncher.launch(arrayOf("text/csv", "application/vnd.ms-excel", "text/comma-separated-values"))
+                }
+            )
         }
+        CsvImportStatus.LOADING -> CsvImportLoadingScreen()
         CsvImportStatus.CLASSIFYING -> {
             CsvClassifyScreen(
                 state = state,
@@ -69,10 +83,14 @@ fun CsvImportScreen(
                 onSetCategory = { id -> viewModel.setCategory(state.currentRow, id) },
                 onSetLabel = { label -> viewModel.setLabel(state.currentRow, label) },
                 onSetPaymentMethod = { pmId -> viewModel.setPaymentMethod(state.currentRow, pmId) },
+                onSetTransactionType = { type -> viewModel.setTransactionType(state.currentRow, type) },
+                onSetAmount = { amount -> viewModel.setAmount(state.currentRow, amount) },
                 onIgnoreAndNext = { viewModel.ignoreAndNext(state.currentRow) },
                 onDecidePossibleDuplicate = { addAnyway ->
                     viewModel.decidePossibleDuplicate(state.currentRow, addAnyway)
                 },
+                onCountFlaggedDuplicates = { viewModel.countFlaggedDuplicates() },
+                onIgnoreAllFlaggedDuplicates = { viewModel.ignoreAllFlaggedDuplicates() },
                 onSplitRow = { amount -> viewModel.splitRow(state.currentRow, amount) },
                 onSaveAll = {
                     viewModel.saveAllTransactions { }
@@ -94,7 +112,7 @@ fun CsvImportScreen(
             )
         }
         CsvImportStatus.DONE -> {
-            CsvImportDoneScreen(saved = state.savedCount, onDone = {
+            CsvImportDoneScreen(saved = state.savedCount, message = state.importNotice, onDone = {
                 viewModel.reset()
                 onClose()
             })
@@ -139,10 +157,15 @@ fun CsvImportScreen(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CsvImportIdleScreen(onPickCsv: () -> Unit) {
+fun CsvImportIdleScreen(
+    onPickCsv: () -> Unit,
+    bankStatement: Boolean = false,
+    password: String = "",
+    onPasswordChange: (String) -> Unit = {}
+) {
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text("Import PhonePe CSV") })
+            TopAppBar(title = { Text(if (bankStatement) "Import bank statement" else "Import PhonePe CSV") })
         }
     ) { padding ->
         Column(
@@ -153,17 +176,38 @@ fun CsvImportIdleScreen(onPickCsv: () -> Unit) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
-            Text("Import PhonePe Statement", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+            Text(if (bankStatement) "Import Bank Statement" else "Import PhonePe Statement", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                "Select your PhonePe CSV statement. You'll classify each transaction with a category.",
+                if (bankStatement) "Select a bank statement PDF. Quantify reads it on this phone, then lets you review each transaction." else "Select your PhonePe CSV statement. You'll classify each transaction with a category.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
             )
+            if (bankStatement) {
+                Spacer(modifier = Modifier.height(18.dp))
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = onPasswordChange,
+                    label = { Text("PDF password (if required)") },
+                    singleLine = true,
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
             Spacer(modifier = Modifier.height(32.dp))
             Button(onClick = onPickCsv) {
-                Text("Select CSV File")
+                Text(if (bankStatement) "Select PDF Statement" else "Select CSV File")
             }
+        }
+    }
+}
+
+@Composable
+private fun CsvImportLoadingScreen() {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            CircularProgressIndicator()
+            Text("Reading bank statement on this phone…")
         }
     }
 }
@@ -178,8 +222,12 @@ fun CsvClassifyScreen(
     onSetCategory: (String) -> Unit,
     onSetLabel: (String) -> Unit,
     onSetPaymentMethod: (String?) -> Unit,
+    onSetTransactionType: (String) -> Unit = {},
+    onSetAmount: (String) -> Unit = {},
     onIgnoreAndNext: () -> Unit,
     onDecidePossibleDuplicate: (Boolean) -> Unit,
+    onCountFlaggedDuplicates: () -> Int = { 0 },
+    onIgnoreAllFlaggedDuplicates: () -> Unit = {},
     onSplitRow: (Double) -> Unit,
     onSaveAll: () -> Unit,
     onStartOver: () -> Unit,
@@ -191,17 +239,21 @@ fun CsvClassifyScreen(
     var showConfirm by remember { mutableStateOf(false) }
     var showSplit by remember { mutableStateOf(false) }
     var showStartOver by remember { mutableStateOf(false) }
+    var showIgnoreAllDuplicates by remember { mutableStateOf(false) }
+    var showImportMenu by remember { mutableStateOf(false) }
     var showAddCategoryDialog by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
 
-    val direction = row.direction
+    val transactionType = classification.transactionType ?: if (row.direction == Direction.PAID) "EXPENSE" else "INCOME"
+    val direction = if (transactionType == "EXPENSE") Direction.PAID else Direction.RECEIVED
+    val displayedAmount = classification.amountOverride?.toDoubleOrNull() ?: row.amount
     val suggestedTypeLabel = if (direction == Direction.PAID) "Expense" else "Income"
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
-                    Text("Classify  (${state.currentRow + 1}/${state.parsedRows.size})")
+                    Text("${if (state.isBankStatement) "Review bank statement" else "Classify"}  (${state.currentRow + 1}/${state.parsedRows.size})")
                 },
                 navigationIcon = {
                     IconButton(onClick = onClose) {
@@ -209,6 +261,25 @@ fun CsvClassifyScreen(
                     }
                 },
                 actions = {
+                    Box {
+                        IconButton(onClick = { showImportMenu = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "Import options")
+                        }
+                        DropdownMenu(
+                            expanded = showImportMenu,
+                            onDismissRequest = { showImportMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Skip all flagged entries") },
+                                enabled = onCountFlaggedDuplicates() > 0,
+                                onClick = {
+                                    showImportMenu = false
+                                    showIgnoreAllDuplicates = true
+                                },
+                                leadingIcon = { Icon(Icons.Default.SkipNext, contentDescription = null) }
+                            )
+                        }
+                    }
                     IconButton(
                         onClick = { showStartOver = true },
                     ) {
@@ -240,6 +311,14 @@ fun CsvClassifyScreen(
                     progress = (state.currentRow + 1) / state.parsedRows.size.toFloat(),
                     modifier = Modifier.fillMaxWidth()
                 )
+                state.importNotice?.let { notice ->
+                    Text(notice, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                }
+                state.errorMessage?.let { message ->
+                    Text(message, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
 
                 Column(
                     modifier = Modifier
@@ -271,21 +350,21 @@ fun CsvClassifyScreen(
                     Spacer(modifier = Modifier.height(16.dp))
 
                     // Amount + direction chip
-                    val amountFormatted = String.format("%.0f", row.amount)
+                    val amountFormatted = String.format("%.2f", displayedAmount)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             "₹$amountFormatted",
                             style = MaterialTheme.typography.headlineMedium,
                             fontWeight = FontWeight.Bold,
-                            color = if (row.direction == Direction.PAID) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                            color = if (direction == Direction.PAID) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Badge(
-                            containerColor = if (row.direction == Direction.PAID) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                            containerColor = if (direction == Direction.PAID) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
                             contentColor = Color.White
                         ) {
                             Text(
-                                when (row.direction) {
+                                when (direction) {
                                     Direction.PAID -> "Paid"
                                     Direction.RECEIVED -> "Received"
                                     Direction.REFUND -> "Refund"
@@ -293,6 +372,20 @@ fun CsvClassifyScreen(
                                 style = MaterialTheme.typography.labelSmall
                             )
                         }
+                    }
+
+                    if (state.isBankStatement) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = classification.amountOverride ?: String.format("%.2f", row.amount),
+                            onValueChange = { value ->
+                                onSetAmount(value.filter { it.isDigit() || it == '.' })
+                            },
+                            label = { Text("Verify amount") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
                     }
 
                     Spacer(modifier = Modifier.height(4.dp))
@@ -303,9 +396,13 @@ fun CsvClassifyScreen(
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.Medium
                     )
+                    if (state.isBankStatement) {
+                        Text(row.rawDetail, style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
 
-                    val possibleDuplicates = remember(row, state.existingTransactions) {
-                        findPossibleDuplicates(row, state.existingTransactions)
+                    val possibleDuplicates = remember(row, state.existingTransactions, transactionType, displayedAmount) {
+                        findPossibleDuplicates(row, state.existingTransactions, transactionType, displayedAmount)
                     }
                     if (possibleDuplicates.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(12.dp))
@@ -399,6 +496,14 @@ fun CsvClassifyScreen(
                     Text("Category", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
                     Text("(Suggested: $suggestedTypeLabel)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f))
                     Spacer(modifier = Modifier.height(4.dp))
+
+                    if (state.isBankStatement) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(selected = transactionType == "EXPENSE", onClick = { onSetTransactionType("EXPENSE") }, label = { Text("Expense") })
+                            FilterChip(selected = transactionType == "INCOME", onClick = { onSetTransactionType("INCOME") }, label = { Text("Income") })
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
 
                     // Category selection (two-row chip pattern)
                     val typeFilter = if (direction == Direction.PAID) "EXPENSE" else "INCOME"
@@ -589,6 +694,25 @@ fun CsvClassifyScreen(
     }
 
     // Start over confirm dialog
+    if (showIgnoreAllDuplicates) {
+        val count = onCountFlaggedDuplicates()
+        AlertDialog(
+            onDismissRequest = { showIgnoreAllDuplicates = false },
+            title = { Text("Skip flagged entries?") },
+            text = { Text("Remove all $count imported rows that match existing transactions from this list? Other rows will stay unchanged.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showIgnoreAllDuplicates = false
+                    onIgnoreAllFlaggedDuplicates()
+                }) { Text("Skip all") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showIgnoreAllDuplicates = false }) { Text("Cancel") }
+            }
+        )
+    }
+
+    // Start over confirm dialog
     if (showStartOver) {
         AlertDialog(
             onDismissRequest = { showStartOver = false },
@@ -668,7 +792,7 @@ private fun String.toDoubleOrNullOrNull(): Double = this.toDoubleOrNull() ?: 0.0
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CsvImportDoneScreen(saved: Int, onDone: () -> Unit) {
+fun CsvImportDoneScreen(saved: Int, message: String? = null, onDone: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(title = { Text("Import Complete") })
@@ -687,6 +811,10 @@ fun CsvImportDoneScreen(saved: Int, onDone: () -> Unit) {
             Text("Import Complete", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(8.dp))
             Text("$saved transactions saved", style = MaterialTheme.typography.bodyLarge)
+            message?.let {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             Spacer(modifier = Modifier.height(32.dp))
             Button(onClick = onDone) {
                 Text("Done")

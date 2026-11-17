@@ -21,6 +21,7 @@ class TransactionRepository @Inject constructor(
     fun getRecent(): Flow<List<TransactionEntity>> = transactionDao.getRecent()
     suspend fun getById(id: String) = transactionDao.getById(id)
     suspend fun insert(transaction: TransactionEntity) = transactionDao.insert(transaction)
+    suspend fun insertAll(transactions: List<TransactionEntity>) = transactionDao.insertAll(transactions)
     suspend fun update(transaction: TransactionEntity) = transactionDao.update(transaction)
     suspend fun delete(transaction: TransactionEntity) = transactionDao.delete(transaction)
     suspend fun getByCategoryId(categoryId: String) = transactionDao.getByCategoryId(categoryId)

@@ -14,7 +14,8 @@ import kotlinx.serialization.Serializable
 data class CsvImportSession(
     val rows: List<CsvRowSnapshot>,
     val classifications: List<RowClassificationSnapshot>,
-    val currentRow: Int
+    val currentRow: Int,
+    val isBankStatement: Boolean = false
 )
 
 @Serializable
@@ -32,7 +33,9 @@ data class RowClassificationSnapshot(
     val paymentMethodId: String? = null,
     val label: String = "",
     val ignored: Boolean = false,
-    val duplicateReviewed: Boolean = false
+    val duplicateReviewed: Boolean = false,
+    val transactionType: String? = null,
+    val amountOverride: String? = null
 )
 
 fun RowClassification.toSnapshot() = RowClassificationSnapshot(
@@ -40,7 +43,9 @@ fun RowClassification.toSnapshot() = RowClassificationSnapshot(
     paymentMethodId = paymentMethodId,
     label = label,
     ignored = ignored,
-    duplicateReviewed = duplicateReviewed
+    duplicateReviewed = duplicateReviewed,
+    transactionType = transactionType,
+    amountOverride = amountOverride
 )
 
 fun RowClassificationSnapshot.toClassification() = RowClassification(
@@ -48,7 +53,9 @@ fun RowClassificationSnapshot.toClassification() = RowClassification(
     paymentMethodId = paymentMethodId,
     label = label,
     ignored = ignored,
-    duplicateReviewed = duplicateReviewed
+    duplicateReviewed = duplicateReviewed,
+    transactionType = transactionType,
+    amountOverride = amountOverride
 )
 
 fun ParsedCsvRow.toSnapshot() = CsvRowSnapshot(

@@ -13,7 +13,7 @@ import com.quantify.app.data.local.entity.*
         BudgetEntity::class,
         WishlistItemEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false,
     autoMigrations = []
 )
